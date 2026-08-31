@@ -30,7 +30,6 @@ export default function Footer() {
   const siteName = getSetting('site_name') || 'AbbyGlow Essentials';
   const siteTagline = getSetting('site_tagline') || '';
   const contactAddress = getSetting('contact_address') || 'Accra, Ghana';
-  const contactEmail = getSetting('contact_email');
   const contactPhone = getSetting('contact_phone');
   const socialInstagram = getSetting('social_instagram') || '';
   const socialTiktok = getSetting('social_tiktok') || '';
@@ -111,9 +110,6 @@ export default function Footer() {
                   <li><Link href="/about" className={linkClass}>About Us</Link></li>
                   <li><Link href="/privacy" className={linkClass}>Privacy Policy</Link></li>
                   <li><Link href="/terms" className={linkClass}>Terms & Conditions</Link></li>
-                  {contactEmail && (
-                    <li><a href={`mailto:${contactEmail}`} className={linkClass}>{contactEmail}</a></li>
-                  )}
                   {contactPhone && (
                     <li><a href={`tel:${contactPhone}`} className={linkClass}>{contactPhone}</a></li>
                   )}
