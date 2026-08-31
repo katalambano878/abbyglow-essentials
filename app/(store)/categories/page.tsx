@@ -70,8 +70,8 @@ export default async function CategoriesPage() {
   return (
     <div className="min-h-screen bg-white">
       <PageHero
-        title="Shop by Category"
-        subtitle="Browse home equipment, gym gear, kitchen tools, electronics, and everyday essentials"
+        title="Categories"
+        subtitle="After-wash, shower gel, body splash, soaps & vitamins."
         backgroundImage="https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=1920&q=85"
       />
 

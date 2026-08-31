@@ -58,8 +58,8 @@ export default function BlogPage() {
   return (
     <div className="min-h-screen bg-white">
       <PageHero
-        title="Our Blog"
-        subtitle="Shopping tips, product guides, and the latest trends from AbbyGlow Essentials."
+        title="Blog"
+        subtitle="Tips, product guides & glow updates."
         backgroundImage="/blog-hero.png"
       />
 

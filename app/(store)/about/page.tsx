@@ -40,8 +40,8 @@ export default function AboutPage() {
   return (
     <div className="min-h-screen bg-white">
       <PageHero
-        title="More Than Just A Brand"
-        subtitle="Fresh. Clean. Glowing. — authentic bath and body essentials from Accra with nationwide delivery."
+        title="About Us"
+        subtitle="Fresh. Clean. Glowing. — from Accra, nationwide."
         backgroundImage="/about-hero.png"
       />
 

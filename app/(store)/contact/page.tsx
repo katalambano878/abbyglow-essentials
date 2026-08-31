@@ -114,8 +114,8 @@ export default function ContactPage() {
   return (
     <div className="min-h-screen bg-white">
       <PageHero
-        title="Get In Touch"
-        subtitle="Have a question? Send us a message."
+        title="Contact"
+        subtitle="Questions? Send us a message."
         backgroundImage="/contact-hero.png"
       />
 

@@ -142,8 +142,8 @@ export default function FAQsPage() {
   return (
     <div className="min-h-screen bg-white">
       <PageHero
-        title="Frequently Asked Questions"
-        subtitle="Find quick answers about ordering, shipping, returns, payments, and more."
+        title="FAQs"
+        subtitle="Ordering, shipping, payments & returns."
         backgroundImage="/faqs-hero.png"
       />
 

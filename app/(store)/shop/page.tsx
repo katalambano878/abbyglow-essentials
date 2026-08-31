@@ -245,8 +245,8 @@ function ShopContent() {
   return (
     <main className="min-h-screen bg-white">
       <PageHero
-        title="Shop All Products"
-        subtitle="After-wash, Olay shower gel, body splashes, skincare soaps, vitamins & glow essentials"
+        title="Shop"
+        subtitle="After-wash, shower gels, body splashes & glow essentials."
         backgroundImage="/images/shop-hero.png"
       />
 
