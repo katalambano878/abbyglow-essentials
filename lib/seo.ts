@@ -6,8 +6,8 @@ export const SITE_DOMAIN = 'abbyglow.shop';
 export const SITE_URL = (process.env.NEXT_PUBLIC_APP_URL || `https://${SITE_DOMAIN}`).replace(/\/+$/, '');
 export const SITE_DESCRIPTION =
   'Shop online at AbbyGlow Essentials in Accra, Ghana. Electronics, beauty, home, fashion, fitness, and everyday essentials — delivered across Ghana.';
-export const SITE_PHONE = '';
-export const SITE_PHONE_SECONDARY = '';
+export const SITE_PHONE: string = '';
+export const SITE_PHONE_SECONDARY: string = '';
 
 export function toWhatsAppE164(localNumber: string): string {
   const digits = localNumber.replace(/\D/g, '');

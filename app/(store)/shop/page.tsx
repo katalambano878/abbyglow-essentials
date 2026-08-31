@@ -77,7 +77,7 @@ function ShopContent() {
         // Build cache key from all filter params
         const cacheKey = `shop:${selectedCategory}:${searchParam}:${priceRange.join('-')}:${selectedRating}:${sortBy}:${page}`;
 
-        const { data, count, error } = await cachedQuery<{ data: any[]; count: number | null; error: any }>(
+        const { data, count, error } = await cachedQuery(
           cacheKey,
           async () => {
             let query = supabase
@@ -148,7 +148,7 @@ function ShopContent() {
             const to = from + productsPerPage - 1;
             query = query.range(from, to);
 
-            return query;
+            return await query;
           },
           2 * 60 * 1000 // Cache for 2 minutes
         );
