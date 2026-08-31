@@ -7,10 +7,10 @@ Isolated staging stack — **not** linked to Anael Cosmetics.
 | Resource | Value |
 |----------|--------|
 | Production URL | https://abbyglow.shop |
-| Staging URL | https://abbyglow-staging.169-58-8-203.sslip.io |
-| Coolify app | `abbyglow-staging` (create in Coolify; do not reuse another store’s app) |
-| GitHub repo | https://github.com/your-org/abbyglow-essentials |
+| Coolify app | `abbyglow-app` (`bf344to4rf4m2zklkijhg4eo`) |
+| GitHub repo | https://github.com/katalambano878/abbyglow-essentials |
 | Branch | `staging/plain-postgres` |
+| Staging URL | https://abbyglow-staging.169-58-8-203.sslip.io (optional; not deployed yet) |
 | Database | `store_abbyglow` (fleet-postgres / pgbouncer) |
 | Uploads | `/data/abbyglow/storage` |
 | DB secret file (VPS) | `/data/fleet/secrets/store_abbyglow.env` |
@@ -37,8 +37,14 @@ Expect `mode: plain_postgres`, `database: ok`.
 - `RESEND_API_KEY` / real `EMAIL_FROM` / `ADMIN_EMAIL`
 - Create admin: `node scripts/create-admin-user.mjs` with `DATABASE_URL` (direct URL)
 
-## Redeploy
+## Redeploy production
 
 ```bash
-sudo fleet deploy abbyglow-staging
+sudo fleet deploy abbyglow-app
+```
+
+Verify:
+
+```bash
+curl -s https://abbyglow.shop/api/health
 ```

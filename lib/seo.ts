@@ -2,10 +2,11 @@ import type { Metadata } from 'next';
 
 export const SITE_NAME = 'AbbyGlow Essentials';
 export const SITE_SHORT_NAME = 'AbbyGlow';
+export const SITE_TAGLINE = 'Fresh. Clean. Glowing.';
 export const SITE_DOMAIN = 'abbyglow.shop';
 export const SITE_URL = (process.env.NEXT_PUBLIC_APP_URL || `https://${SITE_DOMAIN}`).replace(/\/+$/, '');
 export const SITE_DESCRIPTION =
-  'Shop online at AbbyGlow Essentials in Accra, Ghana. Electronics, beauty, home, fashion, fitness, and everyday essentials — delivered across Ghana.';
+  'AbbyGlow Essentials — authentic bath and body essentials in Accra, Ghana. After-wash products, Olay shower gel, body splashes, skincare soaps, vitamins, and glow essentials with nationwide delivery.';
 export const SITE_PHONE: string = process.env.NEXT_PUBLIC_CONTACT_PHONE || '0256789875';
 export const SITE_PHONE_SECONDARY: string = process.env.NEXT_PUBLIC_CONTACT_PHONE_SECONDARY || '';
 
@@ -35,11 +36,13 @@ export const DEFAULT_OG_IMAGE = '/og-image.png';
 export const DEFAULT_KEYWORDS = [
   'AbbyGlow Essentials',
   'AbbyGlow Essentials Ghana',
-  'online shopping Accra',
-  'online store Ghana',
-  'shop online Accra',
-  'ecommerce Ghana',
-  'delivery Accra',
+  'bath and body Ghana',
+  'Olay shower gel Accra',
+  'body splash Ghana',
+  'after wash products',
+  'skincare soap Accra',
+  'vitamins and glow essentials',
+  'nationwide delivery Ghana',
   'AbbyGlow Essentials shop',
 ];
 
@@ -47,8 +50,12 @@ export const SOCIAL_PROFILES = {
   instagram:
     process.env.NEXT_PUBLIC_INSTAGRAM_URL ||
     'https://www.instagram.com/abbyglowessentials_gh',
-  tiktok: process.env.NEXT_PUBLIC_TIKTOK_URL || '',
-  facebook: process.env.NEXT_PUBLIC_FACEBOOK_URL || '',
+  tiktok:
+    process.env.NEXT_PUBLIC_TIKTOK_URL ||
+    'https://www.tiktok.com/@abbyglow.essentia_gh',
+  facebook:
+    process.env.NEXT_PUBLIC_FACEBOOK_URL ||
+    'https://www.facebook.com/share/1HRWTETrZ7/',
 };
 
 type PageSeoInput = {
@@ -136,52 +143,52 @@ export function buildPageMetadata({
 
 export const STATIC_PAGE_SEO = {
   home: {
-    title: 'AbbyGlow Essentials — Online Shopping in Accra, Ghana',
+    title: 'AbbyGlow Essentials — Bath & Body Essentials in Accra, Ghana',
     description: SITE_DESCRIPTION,
     path: '/',
-    keywords: ['AbbyGlow Essentials Accra', 'shop online Ghana'],
+    keywords: ['AbbyGlow Essentials Accra', 'bath and body Ghana', SITE_TAGLINE],
   },
   shop: {
-    title: 'Shop All Products',
+    title: 'Shop Bath & Body Essentials',
     description:
-      'Browse products at AbbyGlow Essentials. Quality goods at fair prices with delivery across Accra and Ghana.',
+      'Browse authentic after-wash products, Olay shower gel, body splashes, skincare soaps, and vitamins at AbbyGlow Essentials with nationwide delivery.',
     path: '/shop',
-    keywords: ['shop online Ghana', 'buy online Accra'],
+    keywords: ['Olay shower gel Ghana', 'body splash Accra', 'after wash products'],
   },
   categories: {
     title: 'Shop by Category',
     description:
-      'Explore AbbyGlow Essentials categories and find what you need — from everyday essentials to seasonal picks.',
+      'Explore AbbyGlow Essentials — after-wash, shower gel, body splashes, soaps, vitamins, and glow essentials.',
     path: '/categories',
-    keywords: ['online store categories Ghana', 'AbbyGlow Essentials categories'],
+    keywords: ['bath and body categories Ghana', 'AbbyGlow Essentials categories'],
   },
   about: {
     title: 'About AbbyGlow Essentials',
     description:
-      'Learn about AbbyGlow Essentials — an online store based in Accra, Ghana, focused on convenient shopping and reliable delivery.',
+      'AbbyGlow Essentials is a retail brand for authentic bath and body essentials in Accra, Ghana — after-wash, Olay shower gel, body splashes, soaps, vitamins, and glow products.',
     path: '/about',
-    keywords: ['about AbbyGlow Essentials', 'online store Accra'],
+    keywords: ['about AbbyGlow Essentials', 'bath and body Accra'],
   },
   contact: {
-    title: 'Contact Us',
+    title: 'Contact AbbyGlow Essentials',
     description:
-      'Get in touch with AbbyGlow Essentials. Questions about orders, products, or delivery? We are here to help customers across Ghana.',
+      'Contact AbbyGlow Essentials in Accra, Ghana. WhatsApp 0256789875 for orders, bath and body product questions, and nationwide delivery support.',
     path: '/contact',
-    keywords: ['contact AbbyGlow Essentials', 'AbbyGlow Essentials customer support'],
+    keywords: ['contact AbbyGlow Essentials', 'AbbyGlow WhatsApp', 'bath and body Accra'],
   },
   blog: {
-    title: 'Blog & Updates',
+    title: 'Blog & Glow Tips',
     description:
-      'Tips, product updates, and shopping guides from AbbyGlow Essentials.',
+      'Bath and body tips, product updates, and freshness guides from AbbyGlow Essentials — after-wash, shower gel, body splashes, and glow essentials.',
     path: '/blog',
-    keywords: ['AbbyGlow Essentials blog', 'shopping tips Ghana'],
+    keywords: ['AbbyGlow Essentials blog', 'bath and body tips Ghana', 'skincare Ghana'],
   },
   faqs: {
     title: 'Frequently Asked Questions',
     description:
-      'Find quick answers about ordering, shipping, returns, payments, and more at AbbyGlow Essentials.',
+      'FAQs about ordering bath and body essentials at AbbyGlow Essentials — shipping across Ghana, Mobile Money payments, returns, and product authenticity.',
     path: '/faqs',
-    keywords: ['AbbyGlow Essentials FAQs', 'shipping Ghana'],
+    keywords: ['AbbyGlow Essentials FAQs', 'nationwide delivery Ghana', 'Mobile Money checkout'],
   },
   privacy: {
     title: 'Privacy Policy',
@@ -194,10 +201,11 @@ export const STATIC_PAGE_SEO = {
     path: '/terms',
   },
   shipping: {
-    title: 'Shipping Information',
-    description: 'Delivery options, timelines, and shipping policies for AbbyGlow Essentials orders in Ghana.',
+    title: 'Shipping & Nationwide Delivery',
+    description:
+      'Nationwide delivery for AbbyGlow Essentials bath and body orders from Accra across Ghana. Delivery timelines and shipping policies.',
     path: '/shipping',
-    keywords: ['delivery Ghana', 'AbbyGlow Essentials shipping'],
+    keywords: ['nationwide delivery Ghana', 'AbbyGlow Essentials shipping', 'Accra delivery'],
   },
   returns: {
     title: 'Returns & Refunds',
@@ -217,11 +225,13 @@ export function organizationSchema() {
     url: SITE_URL,
     logo: absoluteUrl('/logo.png'),
     description: SITE_DESCRIPTION,
+    slogan: SITE_TAGLINE,
     ...(SITE_EMAIL ? { email: SITE_EMAIL } : {}),
     ...(SITE_PHONE ? { telephone: `+233${SITE_PHONE.replace(/^0/, '')}` } : {}),
     address: {
       '@type': 'PostalAddress',
       addressLocality: 'Accra',
+      addressRegion: 'Greater Accra',
       addressCountry: 'GH',
     },
     ...(sameAs.length ? { sameAs } : {}),
@@ -253,15 +263,30 @@ export function localBusinessSchema() {
     '@context': 'https://schema.org',
     '@type': 'Store',
     name: SITE_NAME,
+    slogan: SITE_TAGLINE,
     image: absoluteUrl(DEFAULT_OG_IMAGE),
     url: SITE_URL,
+    description: SITE_DESCRIPTION,
     ...(SITE_PHONE ? { telephone: `+233${SITE_PHONE.replace(/^0/, '')}` } : {}),
     priceRange: 'GH₵',
     address: {
       '@type': 'PostalAddress',
       addressLocality: 'Accra',
+      addressRegion: 'Greater Accra',
       addressCountry: 'GH',
     },
+    areaServed: {
+      '@type': 'Country',
+      name: 'Ghana',
+    },
+    knowsAbout: [
+      'After-wash products',
+      'Olay shower gel',
+      'Body splashes',
+      'Skincare soaps',
+      'Vitamins and glow essentials',
+      'Bath and body care',
+    ],
     openingHoursSpecification: {
       '@type': 'OpeningHoursSpecification',
       dayOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],

@@ -34,6 +34,7 @@ export default function Footer() {
   const contactPhone = getSetting('contact_phone');
   const socialInstagram = getSetting('social_instagram') || '';
   const socialTiktok = getSetting('social_tiktok') || '';
+  const socialFacebook = getSetting('social_facebook') || '';
   const socialSnapchat = getSetting('social_snapchat') || '';
 
   const normalizeSocialUrl = (value: string, baseUrl?: string) => {
@@ -48,6 +49,7 @@ export default function Footer() {
   const socialLinks = [
     { link: normalizeSocialUrl(socialInstagram, 'https://instagram.com/'), icon: 'ri-instagram-line', label: 'Instagram' },
     { link: normalizeSocialUrl(socialTiktok, 'https://www.tiktok.com/@'), icon: 'ri-tiktok-fill', label: 'TikTok' },
+    { link: normalizeSocialUrl(socialFacebook, 'https://www.facebook.com/'), icon: 'ri-facebook-fill', label: 'Facebook' },
     { link: normalizeSocialUrl(socialSnapchat, 'https://www.snapchat.com/add/'), icon: 'ri-snapchat-fill', label: 'Snapchat' },
   ].filter((social) => social.link);
 
@@ -65,7 +67,7 @@ export default function Footer() {
             <div className="lg:col-span-4 space-y-5">
               <BrandLogo inverted />
               <p className="text-white/55 leading-relaxed text-[14px] max-w-sm">
-                {siteTagline || 'Electronics, beauty, home, fashion, and everyday essentials — delivered across Ghana.'}
+                {siteTagline || 'Fresh. Clean. Glowing. Authentic bath and body essentials — nationwide delivery across Ghana.'}
               </p>
               {socialLinks.length > 0 && (
                 <div className="flex gap-3 pt-1">

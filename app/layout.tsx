@@ -29,7 +29,7 @@ const siteUrl = SITE_URL;
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: `${SITE_NAME} — Online Shopping Mall in Accra, Ghana`,
+    default: `${SITE_NAME} — Bath & Body Essentials in Accra, Ghana`,
     template: `%s | ${SITE_SHORT_NAME}`,
   },
   description: SITE_DESCRIPTION,
@@ -77,7 +77,7 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_GH",
     url: siteUrl,
-    title: `${SITE_NAME} — Shop Online in Accra, Ghana`,
+    title: `${SITE_NAME} — ${SITE_TAGLINE}`,
     description: SITE_DESCRIPTION,
     siteName: SITE_SHORT_NAME,
     images: [
@@ -86,14 +86,14 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: `${SITE_NAME} — Shop Online in Accra, Ghana`,
+    title: `${SITE_NAME} — ${SITE_TAGLINE}`,
     description: SITE_DESCRIPTION,
     images: [absoluteUrl(DEFAULT_OG_IMAGE)],
   },
   alternates: {
     canonical: siteUrl,
   },
-  category: "shopping",
+  category: "beauty",
 };
 
 // Google Analytics Measurement ID

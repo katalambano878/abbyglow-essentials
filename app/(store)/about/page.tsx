@@ -23,7 +23,7 @@ export default function AboutPage() {
     {
       icon: 'ri-palette-line',
       title: 'Something for Everyone',
-      description: 'From everyday essentials to special finds — whether you are shopping for yourself or your home, there is something made for you.'
+      description: 'Authentic after-wash products, Olay shower gel, body splashes, skincare soaps, and vitamins for everyday freshness and glow.'
     },
     {
       icon: 'ri-money-dollar-circle-line',
@@ -41,7 +41,7 @@ export default function AboutPage() {
     <div className="min-h-screen bg-white">
       <PageHero
         title="More Than Just A Brand"
-        subtitle="From Accra to your doorstep — shop quality products online at prices that make sense."
+        subtitle="Fresh. Clean. Glowing. — authentic bath and body essentials from Accra with nationwide delivery."
         backgroundImage="/about-hero.png"
       />
 
@@ -77,10 +77,10 @@ export default function AboutPage() {
               <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-gray-900 mb-8 tracking-tight">How It All Started</h2>
               <div className="space-y-6 text-lg text-gray-500 leading-relaxed font-light">
                 <p>
-                  At <strong className="font-semibold text-gray-900">AbbyGlow Essentials</strong>, we believe great shopping starts with trust. Our online mall brings together quality products from trusted sellers — so you can shop with confidence, whether you are picking up everyday essentials or something special.
+                  At <strong className="font-semibold text-gray-900">AbbyGlow Essentials</strong>, we retail authentic bath and body essentials — after-wash products, Olay shower gel, body splashes, skincare soaps, and vitamins for everyday freshness and glow.
                 </p>
                 <p>
-                  We carefully select every product for its quality and value, so you get items you can rely on at prices that make sense. Our goal is simple: to give you products you can trust and a shopping experience you&apos;ll always come back to.
+                  Based in Accra with nationwide delivery, we carefully select every product for quality and authenticity so you can shop with confidence. WhatsApp us on 0256789875 for orders and support.
                 </p>
               </div>
             </div>

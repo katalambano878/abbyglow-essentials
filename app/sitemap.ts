@@ -10,14 +10,14 @@ const STATIC_ROUTES: Array<{
   priority: number;
 }> = [
   { path: '/', changeFrequency: 'daily', priority: 1 },
-  { path: '/shop', changeFrequency: 'daily', priority: 0.9 },
-  { path: '/categories', changeFrequency: 'weekly', priority: 0.8 },
-  { path: '/about', changeFrequency: 'monthly', priority: 0.7 },
-  { path: '/contact', changeFrequency: 'monthly', priority: 0.7 },
-  { path: '/blog', changeFrequency: 'weekly', priority: 0.6 },
-  { path: '/faqs', changeFrequency: 'monthly', priority: 0.6 },
-  { path: '/shipping', changeFrequency: 'monthly', priority: 0.5 },
-  { path: '/returns', changeFrequency: 'monthly', priority: 0.5 },
+  { path: '/shop', changeFrequency: 'daily', priority: 0.95 },
+  { path: '/categories', changeFrequency: 'weekly', priority: 0.85 },
+  { path: '/about', changeFrequency: 'monthly', priority: 0.75 },
+  { path: '/contact', changeFrequency: 'monthly', priority: 0.75 },
+  { path: '/faqs', changeFrequency: 'monthly', priority: 0.65 },
+  { path: '/shipping', changeFrequency: 'monthly', priority: 0.6 },
+  { path: '/returns', changeFrequency: 'monthly', priority: 0.55 },
+  { path: '/blog', changeFrequency: 'weekly', priority: 0.55 },
   { path: '/privacy', changeFrequency: 'yearly', priority: 0.3 },
   { path: '/terms', changeFrequency: 'yearly', priority: 0.3 },
 ];

@@ -42,6 +42,7 @@
     "db:migrate": "node scripts/run-migration.mjs",
     "db:schema-smoke": "node scripts/db-schema-smoke.mjs",
     "db:seed": "node scripts/install-catalog-images.mjs && node scripts/seed-abbyglow-products.mjs",
+    "brand:logo": "node scripts/install-brand-logo.mjs",
     "create-admin": "node scripts/create-admin-user.mjs",
     "start": "next start -H 0.0.0.0 -p 3000"
   },

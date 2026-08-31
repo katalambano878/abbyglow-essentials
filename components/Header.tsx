@@ -95,7 +95,7 @@ export default function Header() {
         <div className="safe-area-top bg-black" />
         <div className="bg-black text-white">
           <div className="max-w-[1400px] mx-auto px-4 sm:px-6 flex items-center justify-center md:justify-between gap-x-8 py-2 text-[10px] sm:text-[11px] font-bold tracking-[0.12em] uppercase">
-            <span className="hidden md:inline">Electronics, beauty, home & more — curated for you</span>
+            <span className="hidden md:inline">Fresh. Clean. Glowing. — bath & body essentials</span>
             <span>Secure checkout · Mobile Money & card</span>
             <div className="hidden md:flex items-center gap-6">
               <Link href="/help" className="hover:text-brand-accent">Help & Support</Link>

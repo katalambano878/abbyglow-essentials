@@ -67,15 +67,15 @@ interface CMSContextType {
 
 const defaultSettings: SiteSettings = {
     site_name: 'AbbyGlow Essentials',
-    site_tagline: 'AbbyGlow Essentials — shop everyday essentials with delivery across Ghana.',
+    site_tagline: 'Fresh. Clean. Glowing. After-wash, Olay shower gel, body splashes, vitamins & glow essentials — Accra with nationwide delivery.',
     site_logo: '/logo.png',
     contact_email: 'abbyglowessentials@gmail.com',
     contact_phone: '0256789875',
     contact_address: 'Accra, Ghana',
-    social_facebook: '',
+    social_facebook: 'https://www.facebook.com/share/1HRWTETrZ7/',
     social_instagram: 'https://www.instagram.com/abbyglowessentials_gh',
     social_twitter: '',
-    social_tiktok: '',
+    social_tiktok: 'https://www.tiktok.com/@abbyglow.essentia_gh',
     social_snapchat: '',
     social_youtube: '',
     primary_color: '#0A0A0A',

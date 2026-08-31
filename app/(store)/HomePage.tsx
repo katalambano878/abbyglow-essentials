@@ -138,7 +138,7 @@ export default function HomePage() {
       <section className="relative min-h-[78vh] md:min-h-[86vh] overflow-hidden bg-black">
         <Image
           src="/images/shop-hero.png"
-          alt="AbbyGlow Essentials — electronics, beauty, home and more"
+          alt="AbbyGlow Essentials — bath and body essentials"
           fill
           className="object-cover object-center opacity-55"
           priority
@@ -149,14 +149,14 @@ export default function HomePage() {
         <div className="relative z-10 max-w-[1400px] mx-auto px-4 sm:px-8 lg:px-12 h-full min-h-[78vh] md:min-h-[86vh] flex items-center">
           <div className="max-w-2xl py-20">
             <p className="text-brand-accent text-[12px] font-extrabold tracking-[0.28em] uppercase mb-5">
-              Your everyday store
+              Fresh. Clean. Glowing.
             </p>
             <h1 className="text-white text-5xl sm:text-6xl lg:text-[4.4rem] font-black leading-[0.95] tracking-tight uppercase">
-              Shop everything.{' '}
-              <span className="text-brand-accent">One place.</span>
+              Bath & body{' '}
+              <span className="text-brand-accent">essentials.</span>
             </h1>
-            <p className="mt-6 text-white/75 text-[16px] sm:text-[18px] max-w-md">
-              Electronics, beauty, home, fashion, fitness, and more — curated and delivered across Ghana.
+            <p className="mt-6 text-white/75 text-[16px] sm:text-[18px] max-w-lg">
+              After-wash products, Olay shower gel, body splashes, skincare soaps, vitamins & glow essentials — Accra with nationwide delivery.
             </p>
             <div className="mt-9 flex flex-wrap gap-3">
               <Link
@@ -274,7 +274,7 @@ export default function HomePage() {
             />
             <div className="relative z-10">
               <p className="text-brand-accent text-[11px] font-extrabold tracking-[0.22em] uppercase mb-3">Shop the range</p>
-              <h3 className="text-3xl md:text-4xl font-black uppercase leading-tight">Electronics to beauty and beyond.</h3>
+              <h3 className="text-3xl md:text-4xl font-black uppercase leading-tight">After-wash & shower gel essentials.</h3>
               <Link
                 href="/shop"
                 className="mt-6 inline-flex rounded-xl bg-brand-accent text-black font-extrabold uppercase tracking-[0.12em] px-6 py-3 text-[12px]"
@@ -293,7 +293,7 @@ export default function HomePage() {
             />
             <div className="relative z-10">
               <p className="text-brand-accent text-[11px] font-extrabold tracking-[0.22em] uppercase mb-3">Limited drop</p>
-              <h3 className="text-3xl md:text-4xl font-black uppercase leading-tight">Exclusive styles. Limited quantities.</h3>
+              <h3 className="text-3xl md:text-4xl font-black uppercase leading-tight">Body splashes, soaps & glow vitamins.</h3>
               <Link
                 href="/shop?sort=new"
                 className="mt-6 inline-flex rounded-xl border border-white text-white hover:bg-white hover:text-black font-extrabold uppercase tracking-[0.12em] px-6 py-3 text-[12px] transition-colors"

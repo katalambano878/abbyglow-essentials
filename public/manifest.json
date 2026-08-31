@@ -1,7 +1,7 @@
 {
   "name": "AbbyGlow Essentials",
   "short_name": "AbbyGlow",
-  "description": "Shop online at AbbyGlow Essentials — Accra, Ghana.",
+  "description": "Authentic bath and body essentials — after-wash, Olay shower gel, body splashes, vitamins & glow. Accra with nationwide delivery.",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
@@ -12,7 +12,8 @@
   "lang": "en",
   "categories": [
     "shopping",
-    "lifestyle"
+    "beauty",
+    "health"
   ],
   "icons": [
     {
