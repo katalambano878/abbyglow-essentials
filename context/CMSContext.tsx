@@ -69,11 +69,11 @@ const defaultSettings: SiteSettings = {
     site_name: 'AbbyGlow Essentials',
     site_tagline: 'AbbyGlow Essentials — shop everyday essentials with delivery across Ghana.',
     site_logo: '/logo.png',
-    contact_email: '',
-    contact_phone: '',
+    contact_email: 'abbyglowessentials@gmail.com',
+    contact_phone: '0256789875',
     contact_address: 'Accra, Ghana',
     social_facebook: '',
-    social_instagram: '',
+    social_instagram: 'https://www.instagram.com/abbyglowessentials_gh',
     social_twitter: '',
     social_tiktok: '',
     social_snapchat: '',
@@ -96,24 +96,7 @@ const CMSContext = createContext<CMSContextType>({
 });
 
 export function CMSProvider({ children }: { children: ReactNode }) {
-    const [settings, setSettings] = useState<SiteSettings>({
-        site_name: 'AbbyGlow Essentials',
-        site_tagline: 'AbbyGlow Essentials — shop everyday essentials with delivery across Ghana.',
-        site_logo: '/logo.png',
-        contact_email: '',
-        contact_phone: '',
-        contact_address: 'Accra, Ghana',
-        social_facebook: '',
-        social_instagram: '',
-        social_twitter: '',
-        social_tiktok: '',
-        social_snapchat: '',
-        social_youtube: '',
-        primary_color: '#0A0A0A',
-        secondary_color: '#C8F542',
-        currency: 'GHS',
-        currency_symbol: 'GH₵',
-    });
+    const [settings, setSettings] = useState<SiteSettings>(defaultSettings);
     const [content, setContent] = useState<CMSContent[]>([]);
     const [banners, setBanners] = useState<Banner[]>([]);
     const [loading, setLoading] = useState(false);

@@ -6,8 +6,8 @@ export const SITE_DOMAIN = 'abbyglow.shop';
 export const SITE_URL = (process.env.NEXT_PUBLIC_APP_URL || `https://${SITE_DOMAIN}`).replace(/\/+$/, '');
 export const SITE_DESCRIPTION =
   'Shop online at AbbyGlow Essentials in Accra, Ghana. Electronics, beauty, home, fashion, fitness, and everyday essentials — delivered across Ghana.';
-export const SITE_PHONE: string = '';
-export const SITE_PHONE_SECONDARY: string = '';
+export const SITE_PHONE: string = process.env.NEXT_PUBLIC_CONTACT_PHONE || '0256789875';
+export const SITE_PHONE_SECONDARY: string = process.env.NEXT_PUBLIC_CONTACT_PHONE_SECONDARY || '';
 
 export function toWhatsAppE164(localNumber: string): string {
   const digits = localNumber.replace(/\D/g, '');
@@ -44,9 +44,11 @@ export const DEFAULT_KEYWORDS = [
 ];
 
 export const SOCIAL_PROFILES = {
-  instagram: '',
-  tiktok: '',
-  facebook: '',
+  instagram:
+    process.env.NEXT_PUBLIC_INSTAGRAM_URL ||
+    'https://www.instagram.com/abbyglowessentials_gh',
+  tiktok: process.env.NEXT_PUBLIC_TIKTOK_URL || '',
+  facebook: process.env.NEXT_PUBLIC_FACEBOOK_URL || '',
 };
 
 type PageSeoInput = {
