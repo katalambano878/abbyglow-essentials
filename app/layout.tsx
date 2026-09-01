@@ -53,12 +53,13 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: '/favicon.png', sizes: '48x48', type: 'image/png' },
-      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+      { url: '/favicon.ico', sizes: '32x32', type: 'image/x-icon' },
+      { url: '/favicon.png?v=2', sizes: '48x48', type: 'image/png' },
+      { url: '/icon-192.png?v=2', sizes: '192x192', type: 'image/png' },
+      { url: '/icon-512.png?v=2', sizes: '512x512', type: 'image/png' },
     ],
-    shortcut: '/favicon.png',
-    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+    shortcut: '/favicon.png?v=2',
+    apple: [{ url: '/apple-touch-icon.png?v=2', sizes: '180x180', type: 'image/png' }],
   },
   manifest: '/manifest.json',
   appleWebApp: {
@@ -119,13 +120,14 @@ export default function RootLayout({
         <meta name="msapplication-TileColor" content="#0A0A0A" />
         <meta name="msapplication-tap-highlight" content="no" />
 
-        <link rel="icon" href="/favicon.png" sizes="48x48" type="image/png" />
-        <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png" />
-        <link rel="shortcut icon" href="/favicon.png" />
+        <link rel="icon" href="/favicon.ico" sizes="32x32" />
+        <link rel="icon" href="/favicon.png?v=2" sizes="48x48" type="image/png" />
+        <link rel="icon" href="/icon-192.png?v=2" sizes="192x192" type="image/png" />
+        <link rel="shortcut icon" href="/favicon.png?v=2" />
 
         {/* Apple Touch Icons from public */}
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
-        <link rel="apple-touch-startup-image" href="/apple-touch-icon.png" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" sizes="180x180" />
+        <link rel="apple-touch-startup-image" href="/apple-touch-icon.png?v=2" />
 
         <link
           href="https://cdn.jsdelivr.net/npm/remixicon@4.1.0/fonts/remixicon.css"

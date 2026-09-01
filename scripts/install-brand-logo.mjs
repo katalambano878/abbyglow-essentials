@@ -3,7 +3,7 @@
  * Remove white background from AbbyGlow logo and generate brand assets.
  * Usage: node scripts/install-brand-logo.mjs [source.png]
  */
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
@@ -173,26 +173,66 @@ async function main() {
     .png()
     .toBuffer();
 
-  await writePng(sharp(markBuffer), join(publicDir, 'logo-mark.png'), {
+  const markTrimmed = await sharp(markBuffer).trim({ threshold: 8 }).png().toBuffer();
+
+  await writePng(sharp(markTrimmed), join(publicDir, 'logo-mark.png'), {
     width: 256,
     height: 256,
     fit: 'inside',
   });
 
-  const iconSizes = [
-    ['favicon.png', 48],
-    ['apple-touch-icon.png', 180],
-    ['icon-192.png', 192],
-    ['icon-512.png', 512],
+  // Favicon / PWA icons: real monogram on white so A + G stay visible at tab size
+  async function squareIcon(size) {
+    const pad = Math.round(size * 0.14);
+    const inner = Math.max(1, size - pad * 2);
+    const placed = await sharp(markTrimmed)
+      .resize(inner, inner, {
+        fit: 'contain',
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      })
+      .png()
+      .toBuffer();
+
+    return sharp({
+      create: {
+        width: size,
+        height: size,
+        channels: 4,
+        background: { r: 255, g: 255, b: 255, alpha: 255 },
+      },
+    }).composite([{ input: placed, gravity: 'center' }]);
+  }
+
+  const iconTargets = [
+    [join(publicDir, 'favicon.png'), 48],
+    [join(publicDir, 'apple-touch-icon.png'), 180],
+    [join(publicDir, 'icon-192.png'), 192],
+    [join(publicDir, 'icon-512.png'), 512],
+    [join(root, 'app', 'icon.png'), 512],
+    [join(root, 'app', 'apple-icon.png'), 180],
   ];
 
-  for (const [name, size] of iconSizes) {
-    await writePng(sharp(markBuffer), join(publicDir, name), {
-      width: size,
-      height: size,
-      fit: 'contain',
-    });
+  for (const [outPath, size] of iconTargets) {
+    await (await squareIcon(size)).png({ compressionLevel: 9 }).toFile(outPath);
+    console.log('  ->', outPath.replace(root, '').replace(/\\/g, '/'));
   }
+
+  const icoPng = await (await squareIcon(32)).png().toBuffer();
+  const icoHeader = Buffer.alloc(6);
+  icoHeader.writeUInt16LE(0, 0);
+  icoHeader.writeUInt16LE(1, 2);
+  icoHeader.writeUInt16LE(1, 4);
+  const icoEntry = Buffer.alloc(16);
+  icoEntry.writeUInt8(32, 0);
+  icoEntry.writeUInt8(32, 1);
+  icoEntry.writeUInt8(0, 2);
+  icoEntry.writeUInt8(0, 3);
+  icoEntry.writeUInt16LE(1, 4);
+  icoEntry.writeUInt16LE(32, 6);
+  icoEntry.writeUInt32LE(icoPng.length, 8);
+  icoEntry.writeUInt32LE(22, 12);
+  writeFileSync(join(publicDir, 'favicon.ico'), Buffer.concat([icoHeader, icoEntry, icoPng]));
+  console.log('  -> /public/favicon.ico');
 
   await buildOgImage(mainLogoBuffer);
   console.log('  -> /public/og-image.png');
