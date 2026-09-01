@@ -35,6 +35,7 @@ const PUBLIC_INSERT = new Set([
   "return_requests",
   "return_items",
   "support_tickets",
+  "contact_submissions",
 ]);
 
 /** Authenticated GET: table → column forced to actor.userId. */

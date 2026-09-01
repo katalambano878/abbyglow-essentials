@@ -122,7 +122,9 @@ const required = [
   'payment_attempts','callback_events','sms_attempts','site_settings','banners',
   'pages','product_images','product_variants','reviews','addresses','cart_items',
   'notifications','store_modules','cms_content','navigation_menus','navigation_items',
-  'order_payment_events','schema_migrations'
+  'order_payment_events','schema_migrations',
+  'contact_submissions','store_settings','wishlist_items','cart_items',
+  'support_tickets','return_requests','blog_posts','audit_logs'
 ];
 const existing = new Set(tables.rows.filter((r) => r.schema === 'public').map((r) => r.table));
 const missing_required = required.filter((t) => !existing.has(t));
