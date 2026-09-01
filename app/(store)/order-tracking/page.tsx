@@ -295,7 +295,7 @@ function OrderTrackingContent() {
             <div className="p-4 bg-gray-50 rounded-lg">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 flex items-center justify-center bg-brand-soft rounded-full">
-                  <i className="ri-money-cny-circle-line text-xl text-brand"></i>
+                  <i className="ri-coins-line text-xl text-brand"></i>
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">

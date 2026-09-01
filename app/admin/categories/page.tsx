@@ -194,7 +194,7 @@ export default function AdminCategoriesPage() {
         </div>
         <div className="bg-white rounded-xl border-2 border-gray-200 p-4">
           <p className="text-sm text-gray-600 mb-1">Featured</p>
-          <p className="text-2xl font-bold text-brand">{categories.filter(c => c.metadata?.featured).length}</p>
+          <p className="text-2xl font-bold text-brand">{categories.filter(c => c.status === 'active' && c.metadata?.featured).length}</p>
         </div>
       </div>
 

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { fetchAdminCustomers, insightSegment } from '@/lib/admin/customers';
 
 // Helper for currency formatting
 const formatCurrency = (amount: number) => {
@@ -35,67 +36,37 @@ export default function CustomerInsightsPage() {
     try {
       setLoading(true);
 
-      // 1. Fetch Profiles
-      const { data: profiles, error: profileError } = await supabase
-        .from('profiles')
-        .select('*');
+      const records = await fetchAdminCustomers(supabase);
 
-      if (profileError) throw profileError;
+      const aggregated = records.map((customer) => {
+        const lastOrderDate = customer.lastOrder || customer.joined;
+        const daysSinceLastOrder = (Date.now() - lastOrderDate.getTime()) / (1000 * 3600 * 24);
+        const segment = insightSegment(customer);
 
-      // 2. Fetch Orders for calculations
-      const { data: orders, error: orderError } = await supabase
-        .from('orders')
-        .select('user_id, total, created_at, status');
-
-      if (orderError) throw orderError;
-
-      // 3. Aggregate Data
-      const aggregated = profiles.map((profile: any) => {
-        const userOrders = orders?.filter(o => o.user_id === profile.id) || [];
-        const totalSpent = userOrders.reduce((sum, o) => sum + (o.total || 0), 0);
-        const orderCount = userOrders.length;
-
-        // Sort orders to find last order
-        const sortedOrders = [...userOrders].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        const lastOrderDate = sortedOrders[0]?.created_at || profile.created_at;
-
-        // Calculate Segment
-        let segment = 'new';
-        const daysSinceJoin = (new Date().getTime() - new Date(profile.created_at).getTime()) / (1000 * 3600 * 24);
-        const daysSinceLastOrder = (new Date().getTime() - new Date(lastOrderDate).getTime()) / (1000 * 3600 * 24);
-
-        if (totalSpent > 1000) segment = 'vip'; // VIP Threshold
-        else if (orderCount > 1) segment = 'returning';
-        else if (daysSinceLastOrder > 90 && orderCount > 0) segment = 'at-risk';
-        else if (daysSinceJoin < 30) segment = 'new';
-        else segment = 'returning'; // Default bucket
-
-        // Risk Level
         let riskLevel = 'low';
         if (daysSinceLastOrder > 60) riskLevel = 'medium';
         if (daysSinceLastOrder > 120) riskLevel = 'high';
 
-        // Engagement Score (mock logic for now based on frequency)
         let engagementScore = 50;
         if (segment === 'vip') engagementScore += 40;
         if (riskLevel === 'high') engagementScore -= 30;
         if (daysSinceLastOrder < 30) engagementScore += 20;
 
         return {
-          id: profile.id,
-          name: profile.full_name || 'Unknown User',
-          email: profile.email,
-          phone: profile.phone || '-',
+          id: customer.id,
+          name: customer.name || 'Unknown User',
+          email: customer.email,
+          phone: customer.phone || '-',
           segment,
-          totalSpent,
-          orders: orderCount,
-          avgOrderValue: orderCount > 0 ? totalSpent / orderCount : 0,
-          lifetimeValue: totalSpent, // Simple CLV for now
-          joinDate: profile.created_at,
-          lastOrder: lastOrderDate,
+          totalSpent: customer.totalSpent,
+          orders: customer.orders,
+          avgOrderValue: customer.orders > 0 ? customer.totalSpent / customer.orders : 0,
+          lifetimeValue: customer.totalSpent,
+          joinDate: customer.joined.toISOString(),
+          lastOrder: lastOrderDate.toISOString(),
           riskLevel,
           engagementScore: Math.min(100, Math.max(0, engagementScore)),
-          tags: [] // Could be populated from metadata
+          tags: [],
         };
       });
 

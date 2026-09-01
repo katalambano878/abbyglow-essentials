@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { fetchAdminCustomers } from '@/lib/admin/customers';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const statColorClasses: Record<string, string> = {
@@ -22,7 +23,7 @@ export default function AdminDashboard() {
       value: 'GH₵ 0.00',
       change: '0%', // Placeholder trend
       trend: 'up',
-      icon: 'ri-money-dollar-circle-line',
+      icon: 'ri-coins-line',
       color: 'brand'
     },
     {
@@ -73,11 +74,8 @@ export default function AdminDashboard() {
         const paidOrderCount = paidOrders.length;
         const avgOrderValue = paidOrderCount > 0 ? totalRevenue / paidOrderCount : 0;
 
-        // 2. Fetch Customers Count (approximation using orders unique emails if we don't have user metrics access)
-        // Since we can't query auth.users directly from client, we'll estimate active customers via orders or just keep it 0 if we can't.
-        // Actually, best to just show "Orders" or "Recent Signups" if we had a public profiles table.
-        // We'll use unique emails from orders as a proxy for "Customers"
-        const uniqueCustomers = new Set(allOrdersData?.map(o => o.email)).size;
+        const adminCustomers = await fetchAdminCustomers(supabase);
+        const uniqueCustomers = adminCustomers.length;
 
 
         // Process Chart Data (Last 7 Days) - only count PAID orders as revenue
@@ -111,7 +109,7 @@ export default function AdminDashboard() {
             value: `GH₵ ${totalRevenue.toFixed(2)}`,
             change: '+0%', // Dynamic change requires date filtering logic which is complex
             trend: 'up',
-            icon: 'ri-money-dollar-circle-line',
+            icon: 'ri-coins-line',
             color: 'brand'
           },
           {
@@ -123,7 +121,7 @@ export default function AdminDashboard() {
             color: 'brand'
           },
           {
-            title: 'Customers (Active)',
+            title: 'Customers',
             value: uniqueCustomers.toString(), // Proxy
             change: '+0%',
             trend: 'up',

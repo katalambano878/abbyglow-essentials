@@ -319,10 +319,13 @@ export default function AdminLayout({
             </button>
 
             <div className="flex items-center space-x-2 lg:space-x-4">
-              <button className="relative w-10 h-10 flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer">
+              <Link
+                href="/admin/notifications"
+                className="relative w-10 h-10 flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Marketing & Notifications"
+              >
                 <i className="ri-notification-3-line text-xl"></i>
-                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-              </button>
+              </Link>
 
               <div className="relative user-menu-container">
                 <button
@@ -334,7 +337,7 @@ export default function AdminLayout({
                   </div>
                   <div className="text-left hidden md:block">
                     <p className="text-sm font-semibold text-gray-900 capitalize">{userRole || 'Admin'}</p>
-                    <p className="text-xs text-gray-500 max-w-[100px] truncate">{user?.email}</p>
+                    <p className="text-xs text-gray-500 max-w-[180px] truncate" title={user?.email}>{user?.email}</p>
                   </div>
                   <i className="ri-arrow-down-s-line text-gray-600"></i>
                 </button>

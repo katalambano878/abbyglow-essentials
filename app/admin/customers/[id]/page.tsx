@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
+import { fetchAdminCustomerById } from '@/lib/admin/customers';
 
 export default function CustomerDetailsPage() {
     const router = useRouter();
@@ -24,27 +25,32 @@ export default function CustomerDetailsPage() {
 
     const fetchCustomerData = async () => {
         try {
-            // 1. Fetch Profile
-            const { data: profile, error: profileError } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', customerId)
-                .single();
-
-            if (profileError) throw profileError;
-
-            // 2. Fetch Orders
-            const { data: ordersData, error: ordersError } = await supabase
-                .from('orders')
-                .select('*')
-                .eq('user_id', customerId)
-                .order('created_at', { ascending: false });
-
-            if (ordersError && ordersError.code !== 'PGRST116') { // Ignore not found if simply no orders? No, select returns empty array usually
-                // Actually select returns empty array if no match, not error.
+            const found = await fetchAdminCustomerById(supabase, customerId);
+            if (!found) {
+                setCustomer(null);
+                setOrders([]);
+                return;
             }
 
-            setCustomer(profile);
+            const record = found.record;
+            const userId = record.user_id || (found.kind === 'profiles' ? record.id : null);
+            const email = record.email || null;
+
+            let ordersQuery = supabase.from('orders').select('*').order('created_at', { ascending: false });
+            if (userId && email) {
+                ordersQuery = ordersQuery.or(`user_id.eq.${userId},email.eq.${email}`);
+            } else if (userId) {
+                ordersQuery = ordersQuery.eq('user_id', userId);
+            } else if (email) {
+                ordersQuery = ordersQuery.eq('email', email);
+            }
+
+            const { data: ordersData } = await ordersQuery;
+
+            setCustomer({
+                ...record,
+                full_name: record.full_name || [record.first_name, record.last_name].filter(Boolean).join(' ') || 'No Name',
+            });
             setOrders(ordersData || []);
         } catch (err) {
             console.error('Error fetching customer:', err);
@@ -56,7 +62,8 @@ export default function CustomerDetailsPage() {
     if (loading) return <div className="p-8 text-center text-gray-500">Loading customer details...</div>;
     if (!customer) return <div className="p-8 text-center text-red-500">Customer not found</div>;
 
-    const totalSpent = orders.reduce((sum, order) => sum + (order.total || 0), 0);
+    const paidOrders = orders.filter((order) => order.status !== 'cancelled');
+    const totalSpent = paidOrders.reduce((sum, order) => sum + (order.total || 0), 0);
 
     return (
         <div className="max-w-7xl mx-auto">
@@ -67,7 +74,7 @@ export default function CustomerDetailsPage() {
                         <i className="ri-arrow-left-line text-xl"></i>
                     </Link>
                     <div className="w-16 h-16 bg-brand-soft rounded-full flex items-center justify-center text-brand text-2xl font-bold">
-                        {customer.full_name?.charAt(0) || customer.email.charAt(0).toUpperCase()}
+                        {customer.full_name?.charAt(0) || customer.email?.charAt(0)?.toUpperCase() || 'C'}
                     </div>
                     <div>
                         <h1 className="text-3xl font-bold text-gray-900">{customer.full_name || 'No Name'}</h1>

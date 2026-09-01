@@ -9,6 +9,7 @@ export default function AdminCouponsPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingCoupon, setEditingCoupon] = useState<any>(null);
   const [coupons, setCoupons] = useState<any[]>([]);
+  const [totalDiscount, setTotalDiscount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -23,6 +24,12 @@ export default function AdminCouponsPage() {
         .from('coupons')
         .select('*')
         .order('created_at', { ascending: false });
+
+      const { data: discountRows } = await supabase
+        .from('orders')
+        .select('discount_total')
+        .gt('discount_total', 0);
+      setTotalDiscount((discountRows || []).reduce((sum, order) => sum + Number(order.discount_total || 0), 0));
 
       if (error) {
         console.warn('Coupons table might not exist or error fetching:', error);
@@ -100,7 +107,7 @@ export default function AdminCouponsPage() {
         </div>
         <div className="bg-white rounded-xl border-2 border-gray-200 p-4">
           <p className="text-sm text-gray-600 mb-1">Total Discount</p>
-          <p className="text-2xl font-bold text-purple-700">--</p>
+          <p className="text-2xl font-bold text-purple-700">GH₵ {totalDiscount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
         </div>
       </div>
 

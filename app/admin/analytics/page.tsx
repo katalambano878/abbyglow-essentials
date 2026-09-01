@@ -203,7 +203,7 @@ export default function AnalyticsPage() {
           <div className="bg-white rounded-xl shadow-sm p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="w-12 h-12 flex items-center justify-center bg-brand-soft rounded-lg">
-                <i className="ri-money-dollar-circle-line text-2xl text-brand"></i>
+                <i className="ri-coins-line text-2xl text-brand"></i>
               </div>
               <span className="text-brand font-semibold text-sm">Live</span>
             </div>
@@ -238,8 +238,8 @@ export default function AnalyticsPage() {
               </div>
             </div>
             <p className="text-sm text-gray-600 mb-1">Conversion Rate</p>
-            <p className="text-3xl font-bold text-gray-900">--</p>
-            <p className="text-xs text-gray-400 mt-1">Setup Tracking</p>
+            <p className="text-3xl font-bold text-gray-900">N/A</p>
+            <p className="text-xs text-gray-400 mt-1">No visitor tracking yet</p>
           </div>
         </div>
 

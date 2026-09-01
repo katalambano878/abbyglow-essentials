@@ -139,7 +139,10 @@ async function main() {
     }
 
     await client.query(
-      `UPDATE categories SET status = 'inactive', updated_at = NOW()
+      `UPDATE categories SET
+         status = 'inactive',
+         metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{featured}', 'false'::jsonb, true),
+         updated_at = NOW()
        WHERE slug <> ALL($1::text[]) AND status = 'active'`,
       [ACTIVE_SLUGS]
     );

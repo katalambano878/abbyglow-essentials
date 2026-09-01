@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
+import { fetchPosCustomers } from '@/lib/admin/customers';
 
 interface Product {
     id: string;
@@ -94,14 +95,8 @@ export default function POSPage() {
                 setCategories(['All', ...cats]);
             }
 
-            // Fetch Customers from customers table (not profiles)
-            const { data: custData } = await supabase
-                .from('customers')
-                .select('id, full_name, email, phone')
-                .order('full_name')
-                .limit(200);
-
-            if (custData) setCustomers(custData);
+            const posCustomers = await fetchPosCustomers(supabase);
+            setCustomers(posCustomers);
 
         } catch (error) {
             console.error('Error fetching POS data:', error);
@@ -323,8 +318,7 @@ export default function POSPage() {
                         p_address: addressData
                     });
                     // Refresh customer list silently
-                    supabase.from('customers').select('id, full_name, email, phone').order('full_name').limit(200)
-                        .then(({ data }) => { if (data) setCustomers(data); });
+                    fetchPosCustomers(supabase).then((data) => { if (data) setCustomers(data); });
                 } catch (custErr) {
                     console.error('Customer upsert error (non-fatal):', custErr);
                 }
@@ -687,7 +681,7 @@ export default function POSPage() {
                                     </button>
                                 </div>
 
-                                <div className="p-6 space-y-6 overflow-y-auto">
+                                <div className="p-6 space-y-6 overflow-y-auto flex-1 min-h-0">
                                     {/* Error Display */}
                                     {checkoutError && (
                                         <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start space-x-2">
@@ -865,7 +859,7 @@ export default function POSPage() {
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">Payment Method</label>
                                         <div className="grid grid-cols-3 gap-3">
                                             {[
-                                                { key: 'cash', label: 'Cash', icon: 'ri-money-cny-circle-line' },
+                                                { key: 'cash', label: 'Cash', icon: 'ri-coins-line' },
                                                 { key: 'card', label: 'Card', icon: 'ri-bank-card-line' },
                                                 { key: 'momo', label: 'MoMo', icon: 'ri-smartphone-line' }
                                             ].map(method => (
@@ -889,12 +883,12 @@ export default function POSPage() {
                                         <div>
                                             <label className="block text-sm font-semibold text-gray-700 mb-2">Amount Tendered</label>
                                             <div className="relative">
-                                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">GH₵</span>
+                                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold tracking-tight">GH₵</span>
                                                 <input
                                                     type="number"
                                                     value={amountTendered}
                                                     onChange={(e) => setAmountTendered(e.target.value)}
-                                                    className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none font-bold text-lg"
+                                                    className="w-full pl-16 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none font-bold text-lg"
                                                     placeholder="0.00"
                                                     autoFocus
                                                 />
@@ -906,7 +900,7 @@ export default function POSPage() {
                                                 <p className="text-right text-red-500 font-medium mt-2">Insufficient amount</p>
                                             )}
                                             {/* Quick amount buttons */}
-                                            <div className="flex flex-wrap gap-2 mt-3">
+                                            <div className="flex flex-wrap gap-2 mt-3 pb-2">
                                                 {[grandTotal, Math.ceil(grandTotal / 10) * 10, Math.ceil(grandTotal / 50) * 50, Math.ceil(grandTotal / 100) * 100].filter((v, i, a) => a.indexOf(v) === i).map(amount => (
                                                     <button
                                                         key={amount}

@@ -28,12 +28,23 @@ export default function NotificationsPage() {
                 throw new Error('You must be logged in as admin to send campaigns');
             }
 
-            // 2. Fetch Recipients from the customers table (includes secondary contacts)
-            const { data: customers, error: fetchError } = await supabase
-                .from('customers')
-                .select('email, phone, full_name, secondary_phone, secondary_email');
+            const [{ data: customers, error: fetchError }, { data: profiles }] = await Promise.all([
+                supabase.from('customers').select('email, phone, full_name, secondary_phone, secondary_email'),
+                supabase.from('profiles').select('email, phone, full_name'),
+            ]);
 
-            if (fetchError) throw fetchError;
+            if (fetchError && !profiles?.length) throw fetchError;
+
+            const mergedCustomers = [
+                ...(customers || []),
+                ...(profiles || []).map((profile) => ({
+                    email: profile.email,
+                    phone: profile.phone,
+                    full_name: profile.full_name,
+                    secondary_phone: null,
+                    secondary_email: null,
+                })),
+            ];
 
             // Build recipients with deduplication
             const seenPhones = new Set<string>();
@@ -42,7 +53,7 @@ export default function NotificationsPage() {
             const normalizePhone = (p: string) => p.replace(/[\s\-\(\)\.]+/g, '').replace(/^00/, '+');
 
             const recipients: any[] = [];
-            for (const c of (customers || [])) {
+            for (const c of mergedCustomers) {
                 const phones = [c.phone, c.secondary_phone].filter(Boolean).map((p: string) => normalizePhone(p));
                 const emails = [c.email, c.secondary_email].filter(Boolean).map((e: string) => e.toLowerCase().trim());
 

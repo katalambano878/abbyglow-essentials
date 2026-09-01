@@ -8,7 +8,7 @@ export default function TestSmsPage() {
     const [isPending, startTransition] = useTransition();
     const [result, setResult] = useState<any>(null);
     const [phone, setPhone] = useState('024'); // Common start
-    const [message, setMessage] = useState('Test message from Standard Store Admin');
+    const [message, setMessage] = useState('Test message from AbbyGlow Essentials Admin');
 
     const handleSend = () => {
         setResult(null);

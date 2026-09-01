@@ -176,27 +176,27 @@ export default function InventoryManagementPage() {
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex items-center justify-between">
-              <div>
+          <div className="bg-white rounded-xl shadow-sm p-6 min-w-0">
+            <div className="flex items-center justify-between gap-3 min-w-0">
+              <div className="min-w-0">
                 <p className="text-sm text-gray-600 mb-1">Total Retail Value</p>
-                <p className="text-3xl font-bold text-brand">GH₵{totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+                <p className="text-2xl lg:text-3xl font-bold text-brand tabular-nums break-words">GH₵{totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
               </div>
-              <div className="w-12 h-12 flex items-center justify-center bg-brand-soft rounded-lg">
-                <i className="ri-money-dollar-circle-line text-2xl text-brand"></i>
+              <div className="w-12 h-12 shrink-0 flex items-center justify-center bg-brand-soft rounded-lg">
+                <i className="ri-coins-line text-2xl text-brand"></i>
               </div>
             </div>
           </div>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
-            <div className="flex-1 max-w-md">
+          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+            <div className="flex-1 min-w-[220px] max-w-md">
               <div className="relative">
                 <i className="ri-search-line absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-xl flex items-center justify-center"></i>
                 <input
                   type="text"
-                  placeholder="Search by product name or SKU..."
+                  placeholder="Search name or SKU..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full pl-12 pr-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-brand focus:border-brand text-sm"
@@ -204,7 +204,7 @@ export default function InventoryManagementPage() {
               </div>
             </div>
 
-            <div className="flex items-center space-x-3">
+            <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center space-x-2 bg-gray-100 rounded-lg p-1">
                 {['all', 'low', 'out', 'good'].map((filter) => (
                   <button
@@ -283,7 +283,7 @@ export default function InventoryManagementPage() {
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Stock</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Retail Value</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Status</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Actions</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900 whitespace-nowrap min-w-[5rem]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
