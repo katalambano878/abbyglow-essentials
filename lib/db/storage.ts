@@ -7,6 +7,7 @@
 import { createHmac } from "crypto";
 import { promises as fs } from "fs";
 import path from "path";
+import { compressUploadedImage } from "@/lib/compress-image";
 
 const STORAGE_ROOT =
   process.env.STORAGE_ROOT || path.join(process.cwd(), ".storage");
@@ -162,14 +163,18 @@ export function createStorageClient(): StorageClient {
             else if (data instanceof ArrayBuffer) buf = Buffer.from(new Uint8Array(data));
             else if (typeof (data as Blob).arrayBuffer === "function") {
               buf = Buffer.from(new Uint8Array(await (data as Blob).arrayBuffer()));
-            } else {
+            }             else {
               buf = Buffer.from(data as any);
             }
+            const incomingType = opts?.contentType || guessContentType(objectPath);
+            const compressed = await compressUploadedImage(buf, incomingType);
+            buf = compressed.buffer;
+            const storedType = compressed.contentType || incomingType;
             await fs.writeFile(full, buf);
-            if (opts?.contentType) {
+            if (storedType) {
               await fs.writeFile(
                 full + ".meta.json",
-                JSON.stringify({ contentType: opts.contentType })
+                JSON.stringify({ contentType: storedType })
               );
             }
             return { data: { path: objectPath }, error: null };

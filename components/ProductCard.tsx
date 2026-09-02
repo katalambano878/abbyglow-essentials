@@ -114,8 +114,7 @@ export default function ProductCard({
             </div>
           )}
 
-          {/* Vertical action icons */}
-          <div className="absolute top-3 right-3 z-[1] flex flex-col gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-300">
+          <div className="absolute top-3 right-3 z-[1] flex flex-row gap-1.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-300">
             <button
               type="button"
               aria-label="Add to wishlist"
@@ -177,7 +176,7 @@ export default function ProductCard({
         </Link>
 
         <div className="flex items-baseline gap-2 mt-auto">
-          <span className="text-[15px] font-semibold text-brand-accent">
+          <span className="text-[15px] font-bold text-black tracking-tight">
             {hasVariants && minVariantPrice ? `From ${formatPrice(minVariantPrice)}` : formatPrice(price)}
           </span>
           {discount > 0 && originalPrice != null && (

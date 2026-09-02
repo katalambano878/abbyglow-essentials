@@ -17,13 +17,6 @@ const FALLBACK_CATEGORIES = [
   { id: 'fitness', name: 'Fitness & Sports', slug: 'fitness', image_url: '/images/categories/fitness.png' },
 ];
 
-const TRUST_ITEMS = [
-  { icon: 'ri-truck-line', title: 'Delivery in Ghana', text: 'Nationwide delivery' },
-  { icon: 'ri-sparkling-2-line', title: 'Curated Quality', text: 'Handpicked essentials' },
-  { icon: 'ri-lock-2-line', title: 'Secure Payment', text: 'MoMo & card checkout' },
-  { icon: 'ri-customer-service-2-line', title: 'Customer Support', text: 'We are here to help' },
-];
-
 export default function HomePage() {
   const [featuredProducts, setFeaturedProducts] = useState<any[]>([]);
   const [newProducts, setNewProducts] = useState<any[]>([]);
@@ -158,35 +151,21 @@ export default function HomePage() {
             <p className="mt-6 text-white/75 text-[16px] sm:text-[18px] max-w-lg">
               After-wash products, Olay shower gel, body splashes, skincare soaps, vitamins & glow essentials — Accra with nationwide delivery.
             </p>
-            <div className="mt-9 flex flex-wrap gap-3">
+            <div className="mt-9 flex flex-row items-stretch gap-2 sm:gap-3">
               <Link
                 href="/shop"
-                className="inline-flex items-center justify-center bg-brand-accent hover:bg-brand-accentDark text-black font-extrabold tracking-[0.12em] uppercase px-8 py-3.5 text-[13px]"
+                className="inline-flex flex-1 sm:flex-none items-center justify-center bg-brand-accent hover:bg-brand-accentDark text-black font-extrabold tracking-[0.08em] sm:tracking-[0.12em] uppercase px-3 sm:px-8 py-3 sm:py-3.5 text-[11px] sm:text-[13px] text-center"
               >
                 Shop now
               </Link>
               <Link
                 href="/categories"
-                className="inline-flex items-center justify-center border border-white text-white hover:bg-white hover:text-black font-extrabold tracking-[0.12em] uppercase px-8 py-3.5 text-[13px] transition-colors"
+                className="inline-flex flex-1 sm:flex-none items-center justify-center border border-white text-white hover:bg-white hover:text-black font-extrabold tracking-[0.08em] sm:tracking-[0.12em] uppercase px-3 sm:px-8 py-3 sm:py-3.5 text-[11px] sm:text-[13px] text-center transition-colors"
               >
                 Explore collection
               </Link>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section className="border-y border-black/10 bg-white">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-8 py-6 grid grid-cols-2 lg:grid-cols-4 gap-6">
-          {TRUST_ITEMS.map((item) => (
-            <div key={item.title} className="flex items-start gap-3">
-              <i className={`${item.icon} text-2xl text-black`} />
-              <div>
-                <p className="font-extrabold uppercase tracking-wide text-[12px] text-black">{item.title}</p>
-                <p className="text-[12px] text-black/50">{item.text}</p>
-              </div>
-            </div>
-          ))}
         </div>
       </section>
 
