@@ -1,11 +1,20 @@
 import Link from 'next/link';
-import { supabase } from '@/lib/supabase';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 import PageHero from '@/components/PageHero';
 
 export const revalidate = 0; // Ensure fresh data on every visit
 
+type CategoryRow = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  image_url: string | null;
+  position: number | null;
+};
+
 export default async function CategoriesPage() {
-  const { data: categoriesData } = await supabase
+  const { data: categoriesData } = await supabaseAdmin
     .from('categories')
     .select(`
       id,
@@ -18,31 +27,7 @@ export default async function CategoriesPage() {
     .eq('status', 'active')
     .order('position', { ascending: true });
 
-  const categoryImages: Record<string, string> = {
-    electronics: 'https://images.unsplash.com/photo-1498049794561-7780e7231661?w=800&q=80',
-    beauty: 'https://images.unsplash.com/photo-1556228720-195a672e8a03?w=800&q=80',
-    'home-kitchen': 'https://images.unsplash.com/photo-1556911220-bff31c812dba?w=800&q=80',
-    fashion: 'https://images.unsplash.com/photo-1483985988350-763728e1935b?w=800&q=80',
-    'hair-care': 'https://images.unsplash.com/photo-1522338242992-e1a54906a8da?w=800&q=80',
-    fitness: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&q=80',
-    'phones-gadgets': 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=800&q=80',
-    fragrance: 'https://images.unsplash.com/photo-1541643600914-78b084683601?w=800&q=80',
-    home: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800&q=80',
-    furniture: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=800&q=80',
-    kitchen: 'https://images.unsplash.com/photo-1556911220-bff31c812dba?w=800&q=80',
-    gym: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&q=80',
-    tools: 'https://images.unsplash.com/photo-1581244277943-4252a3f98475?w=800&q=80',
-    activewear: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&q=80',
-    accessories: 'https://images.unsplash.com/photo-1581244277943-4252a3f98475?w=800&q=80',
-  };
-
-  const fallbackImages = [
-    'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800&q=80',
-    'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&q=80',
-    'https://images.unsplash.com/photo-1556911220-bff31c812dba?w=800&q=80',
-    'https://images.unsplash.com/photo-1581244277943-4252a3f98475?w=800&q=80',
-    'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=800&q=80',
-  ];
+  const FALLBACK_CATEGORY_IMAGE = '/images/placeholder-product.svg';
 
   const palette = [
     { color: 'from-brand to-brand-dark', icon: 'ri-home-smile-line' },
@@ -53,26 +38,22 @@ export default async function CategoriesPage() {
     { color: 'from-brand to-brand-dark', icon: 'ri-store-2-line' },
   ];
 
-  const categories = categoriesData?.map((c, i) => {
+  const categories = ((categoriesData || []) as CategoryRow[]).map((c, i) => {
     const style = palette[i % palette.length];
     return {
       ...c,
-      image:
-        c.image_url ||
-        `/images/categories/${c.slug}.png`,
+      image: c.image_url || FALLBACK_CATEGORY_IMAGE,
       color: style.color,
       icon: style.icon,
-      // Optional: Fetch product count if needed, currently skipping for performance/simplicity
-      productCount: 'Browse',
     };
-  }) || [];
+  });
 
   return (
     <div className="min-h-screen bg-white">
       <PageHero
         title="Categories"
         subtitle="After-wash, shower gel, body splash, soaps & vitamins."
-        backgroundImage="https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=1920&q=85"
+        backgroundImage="/images/shop-hero.png"
       />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
@@ -86,9 +67,11 @@ export default async function CategoriesPage() {
               >
                 {/* Image Section */}
                 <div className="relative h-64 sm:h-72 w-full overflow-hidden rounded-[1.5rem] sm:rounded-[2rem] bg-gray-50">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={category.image}
                     alt={category.name}
+                    loading="lazy"
                     className="w-full h-full object-cover transition-transform duration-1000 ease-[0.25,0.46,0.45,0.94] group-hover:scale-105"
                   />
                   {/* Subtle ethereal overlay */}

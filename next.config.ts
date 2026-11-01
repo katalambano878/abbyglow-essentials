@@ -1,10 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  poweredByHeader: false,
   images: {
     formats: ['image/avif', 'image/webp'],
     minimumCacheTTL: 2592000, // Cache optimized images for 30 days
-    qualities: [60, 70, 75],
+    qualities: [60, 70, 75, 80, 82],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
     imageSizes: [16, 32, 48, 64, 96, 128, 256],
     remotePatterns: [
@@ -37,10 +38,6 @@ const nextConfig: NextConfig = {
         protocol: 'https',
         hostname: 'images.unsplash.com',
       },
-      {
-        protocol: 'https',
-        hostname: 'via.placeholder.com',
-      },
     ],
   },
   eslint: {
@@ -59,10 +56,12 @@ const nextConfig: NextConfig = {
         source: '/:path*',
         headers: [
           { key: 'X-DNS-Prefetch-Control', value: 'on' },
-          { key: 'X-XSS-Protection', value: '1; mode=block' },
+          { key: 'X-XSS-Protection', value: '0' },
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
-          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' }
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=()' }
         ]
       },
       // Service worker - no cache, always fresh
@@ -81,11 +80,17 @@ const nextConfig: NextConfig = {
           { key: 'Content-Type', value: 'application/manifest+json' }
         ]
       },
-      // Cache storefront API routes aggressively (5 min CDN, revalidate in background)
+      // Cache the public catalog endpoints only (checkout / order lookup are POST and private)
       {
-        source: '/api/storefront/:path*',
+        source: '/api/storefront/products',
         headers: [
           { key: 'Cache-Control', value: 'public, s-maxage=900, stale-while-revalidate=1800' }
+        ]
+      },
+      {
+        source: '/api/storefront/categories',
+        headers: [
+          { key: 'Cache-Control', value: 'public, s-maxage=1800, stale-while-revalidate=3600' }
         ]
       },
       // Cache static assets (JS, CSS, fonts) for 1 year (they have content hashes)

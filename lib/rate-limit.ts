@@ -140,5 +140,34 @@ export const RATE_LIMITS = {
   default: {
     maxRequests: 100,
     windowSeconds: 60 // 100 requests per minute
+  },
+
+  // Auth: password sign-in attempts per IP and per account
+  authLoginIp: {
+    maxRequests: 20,
+    windowSeconds: 15 * 60
+  },
+  authLoginAccount: {
+    maxRequests: 8,
+    windowSeconds: 15 * 60
+  },
+  // Auth: account creation per IP
+  authSignup: {
+    maxRequests: 10,
+    windowSeconds: 60 * 60
+  },
+  // Auth: password-reset emails per IP / per account
+  authRecoverIp: {
+    maxRequests: 10,
+    windowSeconds: 60 * 60
+  },
+  authRecoverAccount: {
+    maxRequests: 3,
+    windowSeconds: 60 * 60
   }
 };
+
+/** Forget a key (e.g. clear failed-login counters after a successful sign-in). */
+export function resetRateLimit(identifier: string): void {
+  rateLimitStore.delete(identifier);
+}

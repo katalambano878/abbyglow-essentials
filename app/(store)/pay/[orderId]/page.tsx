@@ -1,18 +1,21 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState, useEffect, Suspense } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { depositPlanLabel, isDepositPlan } from '@/lib/payments/plans';
 
 type Gateway = { id: string; label: string };
 
-export default function PaymentPage() {
+function PaymentPageContent() {
   usePageTitle('Complete Payment');
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const orderId = params.orderId as string;
+  const wasCancelled = searchParams.get('cancelled') === '1';
+  const startFailed = searchParams.get('notice') === 'start-failed';
 
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -88,7 +91,6 @@ export default function PaymentPage() {
           orderId: order.id,
           gateway,
           purpose: isBalance ? 'balance' : 'checkout',
-          customerEmail: order.email,
         }),
       });
 
@@ -105,6 +107,16 @@ export default function PaymentPage() {
       setProcessing(false);
     }
   };
+
+  const isClosed =
+    order?.status === 'cancelled' ||
+    order?.status === 'refunded' ||
+    order?.payment_status === 'refunded';
+  const closedTitle = order?.status === 'cancelled' ? 'Order cancelled' : 'Order refunded';
+  const closedMessage =
+    order?.status === 'cancelled'
+      ? 'This order was cancelled, so no payment is needed. If you still want these items, please place a new order.'
+      : 'This order has been refunded and is closed. No further payment is needed.';
 
   if (loading) {
     return (
@@ -141,6 +153,36 @@ export default function PaymentPage() {
   const shippingAddress = order?.shipping_address || {};
   const customerName = order?.metadata?.first_name || shippingAddress.firstName || 'Customer';
 
+  if (isClosed) {
+    return (
+      <main className="min-h-screen bg-brand-soft flex items-center justify-center px-4">
+        <div className="text-center max-w-md">
+          <div className="w-20 h-20 mx-auto mb-6 bg-gray-100 rounded-full flex items-center justify-center">
+            <i className="ri-close-circle-line text-4xl text-gray-500"></i>
+          </div>
+          <h1 className="text-2xl font-bold text-brand-ink mb-2">{closedTitle}</h1>
+          <p className="text-sm text-gray-500 mb-4">Order {order?.order_number}</p>
+          <p className="text-gray-600 mb-8">{closedMessage}</p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <Link
+              href="/shop"
+              className="inline-flex items-center justify-center px-6 py-3 bg-brand-accent hover:bg-brand-accentDark text-white rounded-lg font-semibold transition-colors"
+            >
+              <i className="ri-shopping-bag-line mr-2"></i>
+              Continue shopping
+            </Link>
+            <Link
+              href="/contact"
+              className="inline-flex items-center justify-center px-6 py-3 border-2 border-gray-300 hover:border-gray-400 text-gray-700 rounded-lg font-semibold transition-colors"
+            >
+              Contact support
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-brand-soft py-12 px-4">
       <div className="max-w-lg mx-auto">
@@ -158,6 +200,30 @@ export default function PaymentPage() {
               : 'your order is waiting for payment.'}
           </p>
         </div>
+
+        {wasCancelled && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+            <div className="flex items-start space-x-3">
+              <i className="ri-arrow-go-back-line text-xl text-amber-600 mt-0.5"></i>
+              <div>
+                <p className="text-sm font-semibold text-amber-800">Payment was cancelled</p>
+                <p className="text-sm text-amber-700 mt-1">No money was taken — you can try again below.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {startFailed && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+            <div className="flex items-start space-x-3">
+              <i className="ri-error-warning-line text-xl text-amber-600 mt-0.5"></i>
+              <div>
+                <p className="text-sm font-semibold text-amber-800">Your order was created, but we could not start the payment</p>
+                <p className="text-sm text-amber-700 mt-1">Nothing was charged. Use the button below to pay for this order.</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
           <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-100">
@@ -301,5 +367,19 @@ export default function PaymentPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function PaymentPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-brand-soft flex items-center justify-center">
+          <div className="w-16 h-16 border-4 border-brand/30 border-t-brand rounded-full animate-spin"></div>
+        </main>
+      }
+    >
+      <PaymentPageContent />
+    </Suspense>
   );
 }

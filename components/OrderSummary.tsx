@@ -1,3 +1,7 @@
+import type { ReactNode } from 'react';
+
+const PLACEHOLDER_IMAGE = '/images/placeholder-product.svg';
+
 interface OrderItem {
   id: string;
   name: string;
@@ -5,39 +9,52 @@ interface OrderItem {
   quantity: number;
   image: string;
   variant?: string;
+  variantId?: string | null;
 }
 
 interface OrderSummaryProps {
   items: OrderItem[];
   subtotal: number;
+  /** Coupon discount already applied to the total */
+  discount?: number;
+  discountLabel?: string;
   shipping: number;
+  /** Label from lib/shipping's shippingLabel(); falls back to FREE / amount */
+  shippingText?: string;
   tax: number;
   total: number;
   paymentPlan?: 'full' | 'deposit_50';
   amountDueNow?: number;
   balanceDue?: number;
+  /** Extra controls rendered under the totals (e.g. the coupon input) */
+  children?: ReactNode;
 }
 
 export default function OrderSummary({
   items,
   subtotal,
+  discount = 0,
+  discountLabel = 'Discount',
   shipping,
+  shippingText,
   tax,
   total,
   paymentPlan = 'full',
   amountDueNow,
   balanceDue,
+  children,
 }: OrderSummaryProps) {
+  void tax;
   return (
     <div className="bg-white rounded-xl shadow-sm p-6 sticky top-4">
       <h2 className="text-xl font-bold text-gray-900 mb-6">Order Summary</h2>
 
       <div className="space-y-4 mb-6">
         {items.map((item) => (
-          <div key={`${item.id}-${item.variant || 'novar'}`} className="flex space-x-4">
+          <div key={`${item.id}-${item.variantId || item.variant || 'novar'}`} className="flex space-x-4">
             <div className="relative w-20 h-20 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
               <img
-                src={item.image}
+                src={item.image || PLACEHOLDER_IMAGE}
                 alt={item.name}
                 className="w-full h-full object-cover"
               />
@@ -59,13 +76,18 @@ export default function OrderSummary({
           <span>Subtotal</span>
           <span className="font-semibold">GH₵ {subtotal.toFixed(2)}</span>
         </div>
+        {discount > 0 && (
+          <div className="flex justify-between text-gray-700">
+            <span>{discountLabel}</span>
+            <span className="font-semibold">-GH₵ {discount.toFixed(2)}</span>
+          </div>
+        )}
         <div className="flex justify-between text-gray-700">
-          <span>Shipping</span>
+          <span>Delivery</span>
           <span className="font-semibold">
-            {shipping === 0 ? 'FREE' : `GH₵ ${shipping.toFixed(2)}`}
+            {shippingText || (shipping === 0 ? 'FREE' : `GH₵ ${shipping.toFixed(2)}`)}
           </span>
         </div>
-
       </div>
 
       <div className="border-t border-gray-200 mt-4 pt-4">
@@ -86,6 +108,8 @@ export default function OrderSummary({
           </div>
         )}
       </div>
+
+      {children && <div className="mt-6 pt-6 border-t border-gray-200">{children}</div>}
 
       <div className="mt-6 p-4 bg-brand-soft border border-brand/30 rounded-lg">
         <div className="flex items-center space-x-2 text-brand">

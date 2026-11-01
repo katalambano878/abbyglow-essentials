@@ -3,6 +3,22 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
+/** Where to go once we are back online: the page we came from if it is ours, else home. */
+function backTarget(): string {
+  try {
+    const ref = document.referrer;
+    if (ref) {
+      const url = new URL(ref);
+      if (url.origin === window.location.origin && url.pathname !== '/offline') {
+        return url.pathname + url.search + url.hash;
+      }
+    }
+  } catch {
+    // ignore malformed referrer
+  }
+  return '/';
+}
+
 export default function OfflinePage() {
   const [isOnline, setIsOnline] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -24,7 +40,7 @@ export default function OfflinePage() {
 
   useEffect(() => {
     if (isOnline) {
-      window.location.href = '/';
+      window.location.href = backTarget();
     }
   }, [isOnline]);
 
@@ -32,7 +48,7 @@ export default function OfflinePage() {
     setRetrying(true);
     setTimeout(() => {
       if (navigator.onLine) {
-        window.location.href = '/';
+        window.location.href = backTarget();
       } else {
         setRetrying(false);
       }
@@ -122,7 +138,7 @@ export default function OfflinePage() {
 
         {/* Status indicator */}
         <div className="mt-6 flex items-center justify-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-brand-soft0' : 'bg-red-400'} ${!isOnline && 'animate-pulse'}`} />
+          <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-400'} ${!isOnline && 'animate-pulse'}`} />
           <span className="text-xs text-gray-400 font-medium">
             {isOnline ? 'Connected' : 'No connection'}
           </span>

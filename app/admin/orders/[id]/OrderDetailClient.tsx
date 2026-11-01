@@ -29,10 +29,25 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
   const [settling, setSettling] = useState(false);
   const [settleMethod, setSettleMethod] = useState('cash');
   const [settleNote, setSettleNote] = useState('');
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [cancelPrompt, setCancelPrompt] = useState(false);
+  const [cancellationReason, setCancellationReason] = useState('');
+  const [autoPrinted, setAutoPrinted] = useState(false);
 
   const handlePrint = () => {
     window.print();
   };
+
+  // /admin/orders/<id>?print=true opens the print dialog once the order has loaded.
+  useEffect(() => {
+    if (!order || autoPrinted) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('print') === 'true') {
+      setAutoPrinted(true);
+      const t = window.setTimeout(() => window.print(), 300);
+      return () => window.clearTimeout(t);
+    }
+  }, [order, autoPrinted]);
 
   // Inject print styles
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -65,6 +80,7 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
           order_items (
             id,
             product_id,
+            variant_id,
             product_name,
             variant_name,
             sku,
@@ -90,6 +106,7 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
             order_items (
               id,
               product_id,
+              variant_id,
               product_name,
               variant_name,
               sku,
@@ -126,20 +143,101 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
     }
   };
 
-  const handleUpdateStatus = async (newStatus?: string) => {
+  const isPaidLike = (status?: string | null) => status === 'paid' || status === 'partially_paid';
+
+  /** Put each line's quantity back on the product (and matching variant), mirroring apply_order_payment. */
+  const restoreStock = async () => {
+    const items: any[] = order.order_items || [];
+    for (const item of items) {
+      const qty = Number(item.quantity) || 0;
+      if (qty <= 0) continue;
+
+      if (item.product_id) {
+        const { data: product, error: readError } = await supabase
+          .from('products')
+          .select('quantity')
+          .eq('id', item.product_id)
+          .maybeSingle();
+        if (readError) throw readError;
+        if (product) {
+          const { error } = await supabase
+            .from('products')
+            .update({ quantity: (Number(product.quantity) || 0) + qty })
+            .eq('id', item.product_id);
+          if (error) throw error;
+        }
+      }
+
+      let variantQuery = supabase.from('product_variants').select('id, quantity');
+      if (item.variant_id) {
+        variantQuery = variantQuery.eq('id', item.variant_id);
+      } else if (item.product_id && item.variant_name) {
+        variantQuery = variantQuery.eq('product_id', item.product_id).eq('name', item.variant_name);
+      } else {
+        continue;
+      }
+      const { data: variants, error: variantError } = await variantQuery;
+      if (variantError) throw variantError;
+      for (const variant of variants || []) {
+        const { error } = await supabase
+          .from('product_variants')
+          .update({ quantity: (Number(variant.quantity) || 0) + qty })
+          .eq('id', variant.id);
+        if (error) throw error;
+      }
+    }
+  };
+
+  const handleUpdateStatus = async (newStatus?: string, options: { reason?: string; onHold?: boolean } = {}) => {
+    if (!order) return;
+    const statusToUpdate = newStatus || order.status;
+
+    // Transition guards
+    if (['shipped', 'delivered'].includes(statusToUpdate) && !isPaidLike(order.payment_status)) {
+      setNotice({ type: 'error', text: `This order is ${order.payment_status || 'unpaid'} — it cannot be marked ${statusLabel(statusToUpdate)} until payment is recorded.` });
+      setShowStatusMenu(false);
+      return;
+    }
+    if (statusToUpdate === 'cancelled' && order.status !== 'cancelled' && options.reason === undefined) {
+      setShowStatusMenu(false);
+      setCancelPrompt(true);
+      return;
+    }
+
     try {
       setStatusUpdating(true);
-      const statusToUpdate = newStatus || order.status;
+      setNotice(null);
+
+      // Re-read the row so metadata written elsewhere (payment refs, stock flags) is not clobbered.
+      const { data: fresh, error: freshError } = await supabase
+        .from('orders')
+        .select('status, payment_status, metadata')
+        .eq('id', order.id)
+        .single();
+      if (freshError) throw freshError;
+
+      const freshMetadata = { ...(fresh?.metadata || {}) };
+      const nextMetadata: Record<string, any> = { ...freshMetadata, tracking_number: trackingNumber };
+      if (options.onHold !== undefined) nextMetadata.on_hold = options.onHold;
+      if (statusToUpdate !== 'pending' && nextMetadata.on_hold) nextMetadata.on_hold = false;
+
+      const cancelling = statusToUpdate === 'cancelled' && fresh?.status !== 'cancelled';
+      if (cancelling) {
+        nextMetadata.cancellation_reason = options.reason || '';
+        nextMetadata.cancelled_at = new Date().toISOString();
+        if (freshMetadata.stock_reduced && !freshMetadata.stock_restored) {
+          await restoreStock();
+          nextMetadata.stock_restored = true;
+        }
+      }
 
       const { error } = await supabase
         .from('orders')
         .update({
           status: statusToUpdate,
           notes: adminNotes,
-          metadata: {
-            ...order.metadata,
-            tracking_number: trackingNumber
-          }
+          metadata: nextMetadata,
+          updated_at: new Date().toISOString()
         })
         .eq('id', order.id);
 
@@ -150,45 +248,59 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
         ...order,
         status: statusToUpdate,
         notes: adminNotes,
-        metadata: { ...order.metadata, tracking_number: trackingNumber }
+        metadata: nextMetadata
       });
 
       // Send Notification (Email + SMS)
       // Only send if status changed OR tracking number was added/changed
       const statusChanged = statusToUpdate !== order.status;
-      const trackingChanged = trackingNumber !== order.metadata?.tracking_number;
+      const trackingChanged = trackingNumber !== (freshMetadata.tracking_number || '');
 
+      let notifyText = '';
       if (statusChanged || (trackingChanged && trackingNumber)) {
-        // Get auth token for notification API
         const { data: { session } } = await supabase.auth.getSession();
         const authToken = session?.access_token;
 
-        fetch('/api/notifications', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(authToken && { 'Authorization': `Bearer ${authToken}` })
-          },
-          body: JSON.stringify({
-            type: 'order_status',
-            payload: {
-              email: order.email,
-              name: customerName,
-              orderId: orderId,
-              orderNumber: order.order_number || orderId,
-              status: statusToUpdate,
-              trackingNumber: trackingNumber,
-              phone: shippingAddress.phone || order.phone // Ensure phone is passed for SMS
-            }
-          })
-        }).catch(err => console.error('Notification error:', err));
+        try {
+          const res = await fetch('/api/notifications', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(authToken && { 'Authorization': `Bearer ${authToken}` })
+            },
+            body: JSON.stringify({
+              type: 'order_status',
+              payload: {
+                email: order.email,
+                name: customerName,
+                orderId: orderId,
+                orderNumber: order.order_number || orderId,
+                status: statusToUpdate,
+                trackingNumber: trackingNumber,
+                phone: shippingAddress.phone || order.phone // Ensure phone is passed for SMS
+              }
+            })
+          });
+          const result = await res.json().catch(() => ({}));
+          notifyText = res.ok
+            ? ` Customer notified${result?.message ? ` (${result.message})` : ''}.`
+            : ` Customer notification failed: ${result?.error || result?.message || `HTTP ${res.status}`}.`;
+        } catch (notifyErr: any) {
+          notifyText = ` Customer notification failed: ${notifyErr?.message || 'network error'}.`;
+        }
       }
 
-      alert('Order updated successfully');
+      const stockText = cancelling && nextMetadata.stock_restored && !freshMetadata.stock_restored ? ' Stock restored.' : '';
+      setNotice({
+        type: notifyText.includes('failed') ? 'error' : 'success',
+        text: `Order updated${statusChanged ? ` to ${statusLabel(statusToUpdate)}` : ''}.${stockText}${notifyText}`
+      });
       setShowStatusMenu(false);
-    } catch (err) {
+      setCancelPrompt(false);
+      setCancellationReason('');
+    } catch (err: any) {
       console.error('Error updating order:', err);
-      alert('Failed to update order');
+      setNotice({ type: 'error', text: `Failed to update order: ${err?.message || 'unknown error'}` });
     } finally {
       setStatusUpdating(false);
     }
@@ -230,18 +342,30 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
         })
       });
 
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw new Error(result.error || 'Failed to send notification');
+        throw new Error(result.error || result.message || `Failed to send notification (HTTP ${response.status})`);
       }
 
-      alert('Notification sent successfully! (Email + SMS if phone available)');
+      setNotice({ type: 'success', text: result.message ? `Notification sent: ${result.message}` : 'Notification sent (email + SMS if a phone number is on file).' });
     } catch (err: any) {
       console.error('Error resending notification:', err);
-      alert(`Failed to resend notification: ${err.message || 'Unknown error'}`);
+      setNotice({ type: 'error', text: `Failed to resend notification: ${err.message || 'Unknown error'}` });
     } finally {
       setResendingNotification(false);
+    }
+  };
+
+  const handleHoldOrder = () => handleUpdateStatus('pending', { onHold: true });
+  const handleContactCustomer = () => {
+    const phone = order?.phone || order?.shipping_address?.phone;
+    if (phone) {
+      window.location.href = `tel:${String(phone).replace(/[^+\d]/g, '')}`;
+    } else if (order?.email && !/\.local$/i.test(order.email)) {
+      window.location.href = `mailto:${order.email}?subject=${encodeURIComponent(`Your order ${order.order_number || ''}`)}`;
+    } else {
+      setNotice({ type: 'error', text: 'This order has no phone number or usable email address.' });
     }
   };
 
@@ -278,10 +402,15 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
     { status: 'Delivered', date: '', completed: order.status === 'delivered' }
   ];
 
-  // Mock fraud analysis for now (or implement real logic later)
+  // Simple risk heuristics from the order's own data
+  const fraudReasons: string[] = [];
+  if (Number(order.total || 0) > 2000) fraudReasons.push('Order total is above GH₵ 2,000');
+  if (!order.phone && !shippingAddress.phone) fraudReasons.push('No phone number on the order');
+  if (/\.local$/i.test(order.email || '')) fraudReasons.push('Placeholder email address (walk-in / POS)');
+  if (order.metadata?.on_hold) fraudReasons.push('Order is currently on hold');
   const fraudAnalysis: FraudAnalysis = {
-    riskLevel: 'low',
-    reasons: []
+    riskLevel: fraudReasons.length >= 2 ? 'high' : fraudReasons.length === 1 ? 'medium' : 'low',
+    reasons: fraudReasons
   };
 
   return (
@@ -381,13 +510,59 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
           </button>
         </div>
 
+        {notice && (
+          <div className={`mb-6 rounded-lg p-4 text-sm flex items-start justify-between gap-4 border ${notice.type === 'success' ? 'bg-brand-soft text-brand border-brand/30' : 'bg-red-50 text-red-700 border-red-200'}`}>
+            <span>{notice.text}</span>
+            <button onClick={() => setNotice(null)} className="shrink-0 cursor-pointer" aria-label="Dismiss">
+              <i className="ri-close-line text-lg"></i>
+            </button>
+          </div>
+        )}
+
+        {cancelPrompt && (
+          <div className="mb-6 bg-white border-2 border-red-200 rounded-xl p-6">
+            <h3 className="font-bold text-gray-900 mb-1">Cancel this order?</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              {order.metadata?.stock_reduced && !order.metadata?.stock_restored
+                ? 'Stock for each item will be returned to inventory.'
+                : 'Stock was never reduced for this order, so inventory will not change.'}
+            </p>
+            <input
+              type="text"
+              value={cancellationReason}
+              onChange={(e) => setCancellationReason(e.target.value)}
+              placeholder="Reason for cancellation (shown in order metadata)"
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-red-400 focus:border-red-400 mb-3"
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => handleUpdateStatus('cancelled', { reason: cancellationReason.trim() })}
+                disabled={statusUpdating || !cancellationReason.trim()}
+                className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold disabled:opacity-50"
+              >
+                {statusUpdating ? 'Cancelling...' : 'Confirm cancellation'}
+              </button>
+              <button
+                onClick={() => { setCancelPrompt(false); setCancellationReason(''); }}
+                disabled={statusUpdating}
+                className="px-5 py-2.5 border-2 border-gray-300 text-gray-700 rounded-lg font-semibold hover:border-gray-400"
+              >
+                Keep order
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
             {fraudAnalysis.riskLevel !== 'low' && (
               <FraudDetectionAlert
                 riskLevel={fraudAnalysis.riskLevel}
                 reasons={fraudAnalysis.reasons}
-                orderId={orderId}
+                orderId={order.order_number || orderId}
+                onHold={order.metadata?.on_hold ? undefined : handleHoldOrder}
+                onContact={handleContactCustomer}
+                busy={statusUpdating}
               />
             )}
 
@@ -650,12 +825,12 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
                             note: settleNote,
                           }),
                         });
-                        const result = await res.json();
-                        if (!result.success) throw new Error(result.message || 'Failed');
+                        const result = await res.json().catch(() => ({}));
+                        if (!res.ok || !result.success) throw new Error(result.message || result.error || 'Failed');
                         await fetchOrderDetails();
-                        alert('Balance recorded — order payment updated.');
+                        setNotice({ type: 'success', text: 'Balance recorded — order payment updated.' });
                       } catch (e: any) {
-                        alert(e.message || 'Failed to settle balance');
+                        setNotice({ type: 'error', text: e.message || 'Failed to settle balance' });
                       } finally {
                         setSettling(false);
                       }

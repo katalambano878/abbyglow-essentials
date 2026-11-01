@@ -2,190 +2,192 @@
 
 import { useState } from 'react';
 
-interface Coupon {
+/** Coupon preview as returned by POST /api/storefront/coupons/validate. */
+export interface AppliedCoupon {
   code: string;
+  description: string | null;
+  type: 'percentage' | 'fixed_amount' | 'free_shipping' | string;
+  /** Absolute discount in GHS for the subtotal it was validated against */
   discount: number;
-  type: 'percentage' | 'fixed';
-  minPurchase?: number;
-  maxDiscount?: number;
-  description: string;
+  freeShipping: boolean;
+}
+
+export const COUPON_STORAGE_KEY = 'abbyglow_coupon';
+
+export function readStoredCouponCode(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return (localStorage.getItem(COUPON_STORAGE_KEY) || '').trim().toUpperCase();
+  } catch {
+    return '';
+  }
+}
+
+export function storeCouponCode(code: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(COUPON_STORAGE_KEY, code.trim().toUpperCase());
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+export function clearStoredCouponCode() {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(COUPON_STORAGE_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+export type CouponPreviewResult =
+  | { success: true; coupon: AppliedCoupon }
+  | { success: false; message: string };
+
+/** Preview a coupon against a subtotal. The final discount is computed by checkout. */
+export async function previewCoupon(code: string, subtotal: number, email?: string): Promise<CouponPreviewResult> {
+  const clean = code.trim().toUpperCase();
+  if (!clean) return { success: false, message: 'Enter a coupon code' };
+  try {
+    const res = await fetch('/api/storefront/coupons/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: clean, subtotal, email: email || undefined }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!data) return { success: false, message: 'Could not check that code. Please try again.' };
+    if (!data.success) return { success: false, message: data.message || 'Invalid coupon code' };
+    return {
+      success: true,
+      coupon: {
+        code: String(data.code || clean),
+        description: data.description ?? null,
+        type: data.type,
+        discount: Number(data.discount) || 0,
+        freeShipping: Boolean(data.freeShipping),
+      },
+    };
+  } catch {
+    return { success: false, message: 'Could not check that code. Please try again.' };
+  }
 }
 
 interface AdvancedCouponSystemProps {
   subtotal: number;
-  onApply: (coupon: Coupon) => void;
+  email?: string;
+  onApply: (coupon: AppliedCoupon) => void;
   onRemove: () => void;
-  appliedCoupon: Coupon | null;
+  appliedCoupon: AppliedCoupon | null;
+  /** Message from the parent (e.g. a stored code that stopped being valid) */
+  notice?: string;
+  compact?: boolean;
 }
 
-export default function AdvancedCouponSystem({ 
-  subtotal, 
-  onApply, 
+export default function AdvancedCouponSystem({
+  subtotal,
+  email,
+  onApply,
   onRemove,
-  appliedCoupon 
+  appliedCoupon,
+  notice,
+  compact = false,
 }: AdvancedCouponSystemProps) {
   const [couponCode, setCouponCode] = useState('');
   const [error, setError] = useState('');
-  const [showAvailable, setShowAvailable] = useState(false);
+  const [checking, setChecking] = useState(false);
 
-  const availableCoupons: Coupon[] = [
-    { 
-      code: 'WELCOME10', 
-      discount: 10, 
-      type: 'percentage',
-      minPurchase: 100,
-      description: '10% off on orders over GH₵100'
-    },
-    { 
-      code: 'SAVE20', 
-      discount: 20, 
-      type: 'percentage',
-      minPurchase: 200,
-      maxDiscount: 50,
-      description: '20% off (max GH₵50) on orders over GH₵200'
-    },
-    { 
-      code: 'FREE50', 
-      discount: 50, 
-      type: 'fixed',
-      minPurchase: 500,
-      description: 'GH₵50 off on orders over GH₵500'
-    },
-    { 
-      code: 'NEWCUSTOMER', 
-      discount: 15, 
-      type: 'percentage',
-      maxDiscount: 30,
-      description: '15% off (max GH₵30) for new customers'
+  const handleApply = async () => {
+    const code = couponCode.trim().toUpperCase();
+    if (!code) {
+      setError('Enter a coupon code');
+      return;
     }
-  ];
-
-  const handleApply = () => {
     setError('');
-    const coupon = availableCoupons.find(c => c.code.toLowerCase() === couponCode.toLowerCase());
-    
-    if (!coupon) {
-      setError('Invalid coupon code');
+    setChecking(true);
+    const result = await previewCoupon(code, subtotal, email);
+    setChecking(false);
+    if (!result.success) {
+      setError(result.message);
       return;
     }
-
-    if (coupon.minPurchase && subtotal < coupon.minPurchase) {
-      setError(`Minimum purchase of GH₵${coupon.minPurchase} required`);
-      return;
-    }
-
-    onApply(coupon);
+    storeCouponCode(result.coupon.code);
+    onApply(result.coupon);
     setCouponCode('');
-    setShowAvailable(false);
   };
 
-  const handleQuickApply = (coupon: Coupon) => {
-    if (coupon.minPurchase && subtotal < coupon.minPurchase) {
-      setError(`Add GH₵${(coupon.minPurchase - subtotal).toFixed(2)} more to use this coupon`);
-      return;
-    }
+  const handleRemove = () => {
+    clearStoredCouponCode();
     setError('');
-    onApply(coupon);
-    setShowAvailable(false);
+    onRemove();
   };
+
+  const discountLabel = appliedCoupon
+    ? appliedCoupon.freeShipping && appliedCoupon.discount <= 0
+      ? 'Free delivery'
+      : `-GH₵${appliedCoupon.discount.toFixed(2)}`
+    : '';
 
   return (
-    <div className="space-y-4">
+    <div className={compact ? 'space-y-3' : 'space-y-4'}>
       {!appliedCoupon ? (
-        <>
-          <div>
-            <label className="block text-sm font-semibold text-gray-900 mb-2">
-              Have a coupon code?
-            </label>
-            <div className="flex space-x-2">
-              <input
-                type="text"
-                value={couponCode}
-                onChange={(e) => {
-                  setCouponCode(e.target.value.toUpperCase());
-                  setError('');
-                }}
-                placeholder="Enter code"
-                className="flex-1 px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-brand focus:border-brand text-sm"
-              />
-              <button
-                onClick={handleApply}
-                className="bg-brand-accent hover:bg-brand-accentDark text-white px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap"
-              >
-                Apply
-              </button>
-            </div>
-            {error && (
-              <p className="text-sm text-red-600 mt-2 flex items-center">
-                <i className="ri-error-warning-line mr-1"></i>
-                {error}
-              </p>
-            )}
+        <div>
+          <label htmlFor="coupon-code" className="block text-sm font-semibold text-gray-900 mb-2">
+            Have a coupon code?
+          </label>
+          <div className="flex space-x-2">
+            <input
+              id="coupon-code"
+              type="text"
+              value={couponCode}
+              autoComplete="off"
+              onChange={(e) => {
+                setCouponCode(e.target.value.toUpperCase());
+                setError('');
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleApply();
+                }
+              }}
+              placeholder="Enter code"
+              className={`flex-1 min-w-0 px-4 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-brand focus:border-brand text-sm ${compact ? 'py-2.5' : 'py-3'}`}
+            />
+            <button
+              type="button"
+              onClick={handleApply}
+              disabled={checking}
+              className={`bg-brand-accent hover:bg-brand-accentDark text-white px-6 rounded-lg font-semibold transition-colors whitespace-nowrap disabled:opacity-60 ${compact ? 'py-2.5' : 'py-3'}`}
+            >
+              {checking ? 'Checking…' : 'Apply'}
+            </button>
           </div>
-
-          <button
-            onClick={() => setShowAvailable(!showAvailable)}
-            className="text-sm text-brand hover:text-brand-dark font-medium flex items-center whitespace-nowrap"
-          >
-            <i className={`ri-arrow-${showAvailable ? 'up' : 'down'}-s-line mr-1`}></i>
-            {showAvailable ? 'Hide' : 'View'} available coupons
-          </button>
-
-          {showAvailable && (
-            <div className="bg-gray-50 rounded-lg p-4 space-y-3">
-              {availableCoupons.map((coupon) => {
-                const isEligible = !coupon.minPurchase || subtotal >= coupon.minPurchase;
-                const needed = coupon.minPurchase ? coupon.minPurchase - subtotal : 0;
-
-                return (
-                  <div
-                    key={coupon.code}
-                    className={`bg-white rounded-lg p-4 border-2 transition-all ${
-                      isEligible
-                        ? 'border-brand/30 hover:border-brand'
-                        : 'border-gray-200 opacity-60'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center space-x-2">
-                        <span className="bg-brand-soft text-brand px-3 py-1 rounded-lg font-bold text-sm">
-                          {coupon.code}
-                        </span>
-                        {!isEligible && (
-                          <span className="text-xs text-gray-500">
-                            Add GH₵{needed.toFixed(2)} more
-                          </span>
-                        )}
-                      </div>
-                      {isEligible && (
-                        <button
-                          onClick={() => handleQuickApply(coupon)}
-                          className="text-brand hover:text-brand-dark font-semibold text-sm whitespace-nowrap"
-                        >
-                          Apply
-                        </button>
-                      )}
-                    </div>
-                    <p className="text-sm text-gray-600">{coupon.description}</p>
-                  </div>
-                );
-              })}
-            </div>
+          {(error || notice) && (
+            <p className={`text-sm mt-2 flex items-center ${error ? 'text-red-600' : 'text-amber-700'}`}>
+              <i className="ri-error-warning-line mr-1"></i>
+              {error || notice}
+            </p>
           )}
-        </>
+        </div>
       ) : (
         <div className="bg-brand-soft border-2 border-brand/30 rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
               <div className="flex items-center space-x-2 mb-1">
                 <i className="ri-price-tag-3-fill text-brand"></i>
                 <span className="font-bold text-brand">{appliedCoupon.code}</span>
+                <span className="text-sm font-semibold text-brand">{discountLabel}</span>
               </div>
-              <p className="text-sm text-brand">{appliedCoupon.description}</p>
+              {appliedCoupon.description && (
+                <p className="text-sm text-brand truncate">{appliedCoupon.description}</p>
+              )}
             </div>
             <button
-              onClick={onRemove}
-              className="w-8 h-8 flex items-center justify-center text-brand hover:text-brand-dark transition-colors"
+              type="button"
+              onClick={handleRemove}
+              aria-label="Remove coupon"
+              className="w-8 h-8 flex items-center justify-center text-brand hover:text-brand-dark transition-colors shrink-0"
             >
               <i className="ri-close-line text-xl"></i>
             </button>

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { checkRateLimit, getClientIdentifier } from '@/lib/rate-limit';
+import { query } from '@/lib/db/pool';
+import { isPlainPostgres } from '@/lib/db/mode';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -56,9 +58,7 @@ async function handleTrack(body: { orderNumber?: string; email?: string }) {
     );
   }
 
-  const { data, error } = await supabaseAdmin
-    .from('orders')
-    .select(`
+  const trackSelect = `
       id,
       order_number,
       status,
@@ -68,8 +68,13 @@ async function handleTrack(body: { orderNumber?: string; email?: string }) {
       amount_paid,
       balance_due,
       total,
+      subtotal,
+      shipping_total,
+      discount_total,
+      shipping_method,
       email,
       created_at,
+      updated_at,
       shipping_address,
       metadata,
       order_items (
@@ -83,9 +88,33 @@ async function handleTrack(body: { orderNumber?: string; email?: string }) {
           product_images (url)
         )
       )
-    `)
+    `;
+  let { data, error } = await supabaseAdmin
+    .from('orders')
+    .select(trackSelect)
     .eq('order_number', orderNumber)
-    .single();
+    .maybeSingle();
+
+  // The tracking form also accepts the SLI-… tracking number printed in emails.
+  if (!data && /^SLI-[A-Z0-9]{4,12}$/i.test(orderNumber) && isPlainPostgres()) {
+    try {
+      const { rows } = await query<{ order_number: string }>(
+        `SELECT order_number FROM orders WHERE upper(metadata->>'tracking_number') = $1 LIMIT 1`,
+        [orderNumber.toUpperCase()]
+      );
+      if (rows[0]?.order_number) {
+        const byTracking = await supabaseAdmin
+          .from('orders')
+          .select(trackSelect)
+          .eq('order_number', rows[0].order_number)
+          .maybeSingle();
+        data = byTracking.data;
+        error = byTracking.error;
+      }
+    } catch {
+      // fall through to not found
+    }
+  }
 
   if (error || !data) {
     return NextResponse.json(
@@ -115,7 +144,7 @@ async function handlePay(body: { orderId?: string }) {
   }
 
   const select =
-    'id, order_number, total, currency, subtotal, shipping_total, discount_total, payment_status, payment_plan, amount_due_now, amount_paid, balance_due, payment_provider, email, phone, shipping_address, created_at, metadata';
+    'id, order_number, total, currency, subtotal, shipping_total, discount_total, status, payment_status, payment_plan, amount_due_now, amount_paid, balance_due, payment_provider, email, phone, shipping_address, created_at, metadata';
 
   let data: Record<string, unknown> | null = null;
   let error: { message?: string } | null = null;
@@ -147,6 +176,7 @@ async function handlePay(body: { orderId?: string }) {
     subtotal: data.subtotal,
     shipping_total: data.shipping_total,
     discount_total: data.discount_total,
+    status: data.status,
     payment_status: data.payment_status,
     payment_plan: data.payment_plan,
     amount_due_now: data.amount_due_now,
@@ -164,6 +194,7 @@ async function handlePay(body: { orderId?: string }) {
       hubtel_client_reference: (data.metadata as any)?.hubtel_client_reference || null,
       payment_gateway: (data.metadata as any)?.payment_gateway || null,
       first_name: (data.metadata as any)?.first_name || null,
+      coupon_code: (data.metadata as any)?.coupon_code || null,
     },
   };
 
@@ -198,6 +229,8 @@ async function handleSuccess(body: { orderNumber?: string; email?: string }) {
       currency,
       subtotal,
       shipping_total,
+      discount_total,
+      shipping_method,
       email,
       phone,
       created_at,
@@ -214,22 +247,58 @@ async function handleSuccess(body: { orderNumber?: string; email?: string }) {
     `
     )
     .eq('order_number', orderNumber)
-    .single();
+    .maybeSingle();
 
   if (error || !data) {
     return NextResponse.json({ success: false, message: 'Order not found' }, { status: 404 });
   }
 
   const email = String(body.email || '').trim().toLowerCase();
-  if (email && String(data.email || '').toLowerCase() !== email) {
+  const verified = Boolean(email) && String(data.email || '').toLowerCase() === email;
+
+  if (email && !verified) {
     return NextResponse.json({ success: false, message: 'Order not found' }, { status: 404 });
   }
 
-  // Strip full email from response unless caller proved ownership
-  const safe = {
-    ...data,
-    email: email ? data.email : maskEmail(String(data.email || '')),
-  };
+  // Without proof of ownership (the email used at checkout) only the payment
+  // summary is returned: order numbers travel through gateway redirects and
+  // referrers, so they must not unlock the customer's phone or address.
+  const safe = verified
+    ? { ...data, verified: true }
+    : {
+        id: data.id,
+        order_number: data.order_number,
+        status: data.status,
+        payment_status: data.payment_status,
+        payment_plan: data.payment_plan,
+        amount_due_now: data.amount_due_now,
+        amount_paid: data.amount_paid,
+        balance_due: data.balance_due,
+        total: data.total,
+        currency: data.currency,
+        subtotal: data.subtotal,
+        shipping_total: data.shipping_total,
+        email: maskEmail(String(data.email || '')),
+        phone: maskPhone(String(data.phone || '')),
+        created_at: data.created_at,
+        shipping_address: data.shipping_address
+          ? { city: (data.shipping_address as any)?.city, region: (data.shipping_address as any)?.region }
+          : null,
+        metadata: {
+          payment_gateway: (data.metadata as any)?.payment_gateway || null,
+          payment_plan: (data.metadata as any)?.payment_plan || null,
+          delivery_method: (data.metadata as any)?.delivery_method || null,
+        },
+        order_items: (data.order_items || []).map((item: any) => ({
+          id: item.id,
+          product_name: item.product_name,
+          variant_name: item.variant_name,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          metadata: { image: item.metadata?.image || null, is_preorder: item.metadata?.is_preorder || false },
+        })),
+        verified: false,
+      };
 
   return NextResponse.json({ success: true, order: safe });
 }

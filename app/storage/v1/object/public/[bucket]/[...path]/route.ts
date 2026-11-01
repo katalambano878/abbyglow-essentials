@@ -1,4 +1,4 @@
-import { readObject } from "@/lib/db/storage";
+import { readObject, isPublicBucket, parseObjectPath } from "@/lib/db/storage";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -8,7 +8,13 @@ export async function GET(
   ctx: { params: Promise<{ bucket: string; path: string[] }> }
 ): Promise<Response> {
   const { bucket, path } = await ctx.params;
-  const objectPath = path.map(decodeURIComponent).join("/");
+  const objectPath = parseObjectPath(path);
+  if (!objectPath || !isPublicBucket(bucket)) {
+    return new Response(JSON.stringify({ error: "Object not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
   const obj = await readObject(bucket, objectPath);
   if (!obj) {
     return new Response(JSON.stringify({ error: "Object not found" }), {
@@ -20,7 +26,9 @@ export async function GET(
     status: 200,
     headers: {
       "Content-Type": obj.contentType,
-      "Cache-Control": "public, max-age=86400, immutable",
+      "Content-Length": String(obj.bytes.length),
+      "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+      "X-Content-Type-Options": "nosniff",
       "Access-Control-Allow-Origin": "*",
     },
   });

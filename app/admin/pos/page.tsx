@@ -23,7 +23,18 @@ interface Customer {
     full_name: string;
     email: string;
     phone?: string;
+    user_id?: string | null;
 }
+
+const ORDER_CODE_CHARS = 'ABCDEFGHJKLMNPQSTUVWXYZ23456789';
+const generateOrderNumber = () => {
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+        code += ORDER_CODE_CHARS[Math.floor(Math.random() * ORDER_CODE_CHARS.length)];
+    }
+    return `ORD-${Date.now()}-${code}`;
+};
+const isWalkInEmail = (email: string) => /@pos\.local$/i.test(email);
 
 export default function POSPage() {
     const [products, setProducts] = useState<Product[]>([]);
@@ -44,6 +55,8 @@ export default function POSPage() {
     const [processing, setProcessing] = useState(false);
     const [completedOrder, setCompletedOrder] = useState<any>(null);
     const [checkoutError, setCheckoutError] = useState<string | null>(null);
+    const [stockNotice, setStockNotice] = useState<string | null>(null);
+    const [linkCopied, setLinkCopied] = useState(false);
     const [deliveryMethod, setDeliveryMethod] = useState<'pickup' | 'doorstep'>('pickup');
     const [guestDetails, setGuestDetails] = useState({
         firstName: '',
@@ -85,7 +98,7 @@ export default function POSPage() {
                     price: p.price,
                     quantity: p.quantity,
                     category: p.categories?.name || 'Uncategorized',
-                    image: p.product_images?.[0]?.url || 'https://via.placeholder.com/150',
+                    image: p.product_images?.[0]?.url || '/images/placeholder-product.svg',
                     sku: p.sku
                 }));
                 setProducts(formatted);
@@ -106,13 +119,28 @@ export default function POSPage() {
     };
 
     // Cart Functions
+    const showStockNotice = (message: string) => {
+        setStockNotice(message);
+        window.setTimeout(() => setStockNotice(null), 2500);
+    };
+
     const addToCart = (product: Product) => {
+        const available = Number(product.quantity) || 0;
+        if (available <= 0) {
+            showStockNotice(`${product.name} is out of stock`);
+            return;
+        }
+        const existing = cart.find(item => item.id === product.id);
+        if (existing && existing.cartQuantity >= available) {
+            showStockNotice(`Only ${available} of ${product.name} in stock`);
+            return;
+        }
         setCart(prev => {
-            const existing = prev.find(item => item.id === product.id);
-            if (existing) {
+            const line = prev.find(item => item.id === product.id);
+            if (line) {
                 return prev.map(item =>
                     item.id === product.id
-                        ? { ...item, cartQuantity: item.cartQuantity + 1 }
+                        ? { ...item, cartQuantity: Math.min(item.cartQuantity + 1, available) }
                         : item
                 );
             }
@@ -125,6 +153,11 @@ export default function POSPage() {
     };
 
     const updateQuantity = (productId: string, delta: number) => {
+        const line = cart.find(item => item.id === productId);
+        if (line && delta > 0 && line.cartQuantity + delta > (Number(line.quantity) || 0)) {
+            showStockNotice(`Only ${line.quantity} of ${line.name} in stock`);
+            return;
+        }
         setCart(prev => prev.map(item => {
             if (item.id === productId) {
                 const newQty = item.cartQuantity + delta;
@@ -164,8 +197,8 @@ export default function POSPage() {
 
     // Get the customer email and phone for the order
     const getOrderEmail = () => {
-        if (selectedCustomer) return selectedCustomer.email;
-        return guestDetails.email || 'pos-walkin@store.local';
+        if (selectedCustomer?.email) return selectedCustomer.email;
+        return guestDetails.email.trim() || `walkin-${Date.now()}@pos.local`;
     };
 
     const getOrderPhone = () => {
@@ -221,10 +254,11 @@ export default function POSPage() {
         setCheckoutError(null);
 
         try {
-            const orderNumber = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            const orderNumber = generateOrderNumber();
             const customerName = getCustomerFullName();
             const customerEmail = getOrderEmail();
             const customerPhone = getOrderPhone();
+            const walkIn = isWalkInEmail(customerEmail);
 
             const isCashOrCard = paymentMethod === 'cash' || paymentMethod === 'card';
 
@@ -254,23 +288,30 @@ export default function POSPage() {
                 .from('orders')
                 .insert([{
                     order_number: orderNumber,
-                    user_id: null,
+                    user_id: selectedCustomer?.user_id || null,
                     email: customerEmail,
                     phone: customerPhone,
-                    status: isCashOrCard ? 'processing' : 'pending',
-                    payment_status: isCashOrCard ? 'paid' : 'pending',
+                    status: 'pending',
+                    payment_status: 'pending',
                     currency: 'GHS',
                     subtotal: cartTotal,
                     tax_total: tax,
                     shipping_total: 0,
                     discount_total: 0,
                     total: grandTotal,
+                    payment_plan: 'full',
+                    amount_due_now: grandTotal,
+                    amount_paid: 0,
+                    balance_due: grandTotal,
                     shipping_method: deliveryMethod,
                     payment_method: paymentMethod === 'momo' ? 'moolre' : paymentMethod,
                     shipping_address: addressData,
                     billing_address: addressData,
                     metadata: {
                         pos_sale: true,
+                        checkout_source: 'pos',
+                        payment_gateway: paymentMethod,
+                        walk_in: walkIn,
                         first_name: addressData.firstName,
                         last_name: addressData.lastName,
                         phone: customerPhone
@@ -299,7 +340,7 @@ export default function POSPage() {
             if (itemsError) throw itemsError;
 
             // 3. Upsert Customer Record (email is required in customers table)
-            const hasRealEmail = customerEmail && customerEmail !== 'pos-walkin@store.local';
+            const hasRealEmail = Boolean(customerEmail) && !walkIn;
             const upsertEmail = hasRealEmail
                 ? customerEmail
                 : customerPhone
@@ -314,7 +355,7 @@ export default function POSPage() {
                         p_full_name: customerName || null,
                         p_first_name: addressData.firstName || null,
                         p_last_name: addressData.lastName || null,
-                        p_user_id: null,
+                        p_user_id: selectedCustomer?.user_id || null,
                         p_address: addressData
                     });
                     // Refresh customer list silently
@@ -324,24 +365,28 @@ export default function POSPage() {
                 }
             }
 
-            // 4. If Cash or Card — mark as paid, reduce stock
+            // 4. If Cash or Card — record the payment (marks paid + reduces stock once)
             if (isCashOrCard) {
-                // Call mark_order_paid to reduce stock (uses order_number as order_ref)
-                try {
-                    await supabase.rpc('mark_order_paid', {
-                        order_ref: orderNumber,
-                        moolre_ref: `POS-${paymentMethod.toUpperCase()}-${Date.now()}`
-                    });
-                } catch (stockErr) {
-                    console.error('Stock reduction error (non-fatal):', stockErr);
+                const { error: paymentError } = await supabase.rpc('apply_order_payment', {
+                    order_ref: orderNumber,
+                    p_amount: grandTotal,
+                    p_gateway: `pos_${paymentMethod}`,
+                    gateway_ref: `POS-${paymentMethod.toUpperCase()}-${Date.now()}`,
+                    kind: 'checkout'
+                });
+
+                if (paymentError) {
+                    throw new Error(
+                        `Order ${orderNumber} was created but the ${paymentMethod} payment could not be recorded: ${paymentError.message}. Open the order in Orders to settle it.`
+                    );
                 }
 
                 // Success — show completed
                 setCompletedOrder({ id: order.id, orderNumber, total: grandTotal, items: cart });
                 setCart([]);
 
-                // Send notification
-                if (customerEmail && customerEmail !== 'pos-walkin@store.local') {
+                // Send notification (server resolves the order by its number)
+                if (hasRealEmail) {
                     const { data: { session } } = await supabase.auth.getSession();
                     fetch('/api/notifications', {
                         method: 'POST',
@@ -351,12 +396,7 @@ export default function POSPage() {
                         },
                         body: JSON.stringify({
                             type: 'order_created',
-                            payload: {
-                                ...order,
-                                order_number: orderNumber,
-                                email: customerEmail,
-                                shipping_address: addressData
-                            }
+                            payload: { order_number: orderNumber }
                         })
                     }).catch(err => console.error('POS Notification error:', err));
                 }
@@ -367,11 +407,7 @@ export default function POSPage() {
                 const paymentRes = await fetch('/api/payment/moolre', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        orderId: orderNumber,
-                        amount: grandTotal,
-                        customerEmail: customerEmail
-                    })
+                    body: JSON.stringify({ orderId: orderNumber })
                 });
 
                 const paymentResult = await paymentRes.json();
@@ -456,6 +492,12 @@ export default function POSPage() {
 
                 {/* Grid Area */}
                 <div className="flex-1 overflow-y-auto p-4 content-start">
+                    {stockNotice && (
+                        <div className="mb-3 px-4 py-2 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg flex items-center">
+                            <i className="ri-error-warning-line mr-2"></i>
+                            {stockNotice}
+                        </div>
+                    )}
                     {loading ? (
                         <div className="flex items-center justify-center h-full text-gray-500">Loading products...</div>
                     ) : filteredProducts.length === 0 ? (
@@ -647,14 +689,19 @@ export default function POSPage() {
                                             </a>
                                             <div className="mt-2">
                                                 <button
-                                                    onClick={() => {
-                                                        navigator.clipboard.writeText(completedOrder.paymentUrl);
-                                                        alert('Payment link copied!');
+                                                    onClick={async () => {
+                                                        try {
+                                                            await navigator.clipboard.writeText(completedOrder.paymentUrl);
+                                                            setLinkCopied(true);
+                                                            window.setTimeout(() => setLinkCopied(false), 2000);
+                                                        } catch {
+                                                            setCheckoutError('Clipboard access was blocked — copy the link from the button above.');
+                                                        }
                                                     }}
                                                     className="text-sm text-brand hover:text-brand font-medium underline"
                                                 >
-                                                    <i className="ri-file-copy-line mr-1"></i>
-                                                    Copy Link
+                                                    <i className={`${linkCopied ? 'ri-check-line' : 'ri-file-copy-line'} mr-1`}></i>
+                                                    {linkCopied ? 'Link copied' : 'Copy Link'}
                                                 </button>
                                             </div>
                                         </div>

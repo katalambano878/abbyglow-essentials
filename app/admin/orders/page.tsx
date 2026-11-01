@@ -3,8 +3,17 @@
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { adminFetch } from '@/lib/admin-fetch';
 import ProductSalesStats from './ProductSalesStats';
 import { depositPlanLabel, isDepositPlan } from '@/lib/payments/plans';
+
+/** Money has been received (full or deposit). One predicate for tabs, counts and bulk actions. */
+const isPaidLike = (o: { payment_status?: string }) =>
+  o.payment_status === 'paid' || o.payment_status === 'partially_paid';
+
+const csvCell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+const toCsv = (rows: unknown[][]) => rows.map((r) => r.map(csvCell).join(',')).join('\n');
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 interface Order {
   id: string;
@@ -61,6 +70,12 @@ export default function AdminOrdersPage() {
   const [showProductStats, setShowProductStats] = useState(false);
   const [productFilter, setProductFilter] = useState('all');
   const [availableProducts, setAvailableProducts] = useState<string[]>([]);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
+  const [shippingMethodFilter, setShippingMethodFilter] = useState('all');
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [bulkWorking, setBulkWorking] = useState(false);
 
   useEffect(() => {
     fetchOrders();
@@ -110,14 +125,8 @@ export default function AdminOrdersPage() {
       setAvailableProducts(Array.from(productNames).sort());
 
       // Confirmed = money received (full or deposit). Abandoned = no payment yet.
-      const confirmedOrders =
-        ordersData?.filter(
-          (o) => o.payment_status === 'paid' || o.payment_status === 'partially_paid'
-        ) || [];
-      const abandonedOrders =
-        ordersData?.filter(
-          (o) => o.payment_status !== 'paid' && o.payment_status !== 'partially_paid'
-        ) || [];
+      const confirmedOrders = ordersData?.filter(isPaidLike) || [];
+      const abandonedOrders = ordersData?.filter((o) => !isPaidLike(o)) || [];
       
       setConfirmedCount(confirmedOrders.length);
       setAbandonedCount(abandonedOrders.length);
@@ -222,74 +231,103 @@ export default function AdminOrdersPage() {
     }
   };
 
-  const handleBulkAction = async (action: string, newStatus?: string) => {
-    if (newStatus) {
-      try {
-        const { error } = await supabase
-          .from('orders')
-          .update({ status: newStatus })
-          .in('id', selectedOrders);
-
-        if (error) throw error;
-
-
-
-        // Send Notifications with auth token
-        const { data: { session } } = await supabase.auth.getSession();
-        const authToken = session?.access_token;
-        
-        const updatedOrders = orders.filter(o => selectedOrders.includes(o.id));
-        updatedOrders.forEach(order => {
-          fetch('/api/notifications', {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              ...(authToken && { 'Authorization': `Bearer ${authToken}` })
-            },
-            body: JSON.stringify({
-              type: 'order_updated',
-              payload: { order, status: newStatus }
-            })
-          }).catch(err => console.error('Notification error', err));
-        });
-
-        await fetchOrders();
-        setSelectedOrders([]);
-        alert(`${selectedOrders.length} orders updated to ${newStatus}`);
-      } catch (error) {
-        console.error('Error updating orders:', error);
-        alert('Failed to update orders');
-      }
-    } else if (action === 'Export') {
-      const ordersToExport = orders.filter(o => selectedOrders.includes(o.id));
-      const csvContent = `Order ID,Customer,Email,Date,Items,Total,Status,Payment\n${ordersToExport.map(o =>
-        `${o.order_number || o.id},${getCustomerName(o)},${getCustomerEmail(o)},${formatDate(o.created_at)},${getItemCount(o)},${o.total},${o.status},${o.payment_method || 'N/A'}`
-      ).join('\n')}`;
-      const blob = new Blob([csvContent], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'selected-orders.csv';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-    }
-  };
-
-  const handleExportAll = () => {
-    const csvContent = `Order ID,Customer,Email,Date,Items,Total,Status,Payment\n${orders.map(o =>
-      `${o.order_number || o.id},${getCustomerName(o)},${getCustomerEmail(o)},${formatDate(o.created_at)},${getItemCount(o)},${o.total},${o.status},${o.payment_method || 'N/A'}`
-    ).join('\n')}`;
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+  const downloadCsv = (content: string, filename: string) => {
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'all-orders.csv';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
+  };
+
+  const ordersCsv = (list: Order[]) =>
+    toCsv([
+      ['Order ID', 'Customer', 'Email', 'Date', 'Items', 'Total', 'Status', 'Payment Status', 'Payment Method'],
+      ...list.map((o) => [
+        o.order_number || o.id,
+        getCustomerName(o),
+        getCustomerEmail(o),
+        formatDate(o.created_at),
+        getItemCount(o),
+        Number(o.total || 0).toFixed(2),
+        o.status,
+        o.payment_status,
+        o.payment_method || 'N/A',
+      ]),
+    ]);
+
+  const handleBulkAction = async (action: string, newStatus?: string) => {
+    if (newStatus) {
+      const selected = orders.filter((o) => selectedOrders.includes(o.id));
+      // Only paid / partially paid orders that are not cancelled can move through fulfilment.
+      const eligible = selected.filter((o) => isPaidLike(o) && o.status !== 'cancelled');
+      const skipped = selected.length - eligible.length;
+
+      if (eligible.length === 0) {
+        setNotice({ type: 'error', text: 'None of the selected orders are paid (or they are cancelled), so nothing was updated.' });
+        return;
+      }
+
+      setBulkWorking(true);
+      setNotice(null);
+      try {
+        const { error } = await supabase
+          .from('orders')
+          .update({ status: newStatus, updated_at: new Date().toISOString() })
+          .in('id', eligible.map((o) => o.id));
+
+        if (error) throw error;
+
+        // Notify customers one at a time, pausing between calls so the admin rate limit is not tripped.
+        const { data: { session } } = await supabase.auth.getSession();
+        const authToken = session?.access_token;
+        const failed: string[] = [];
+
+        for (let i = 0; i < eligible.length; i++) {
+          const order = eligible[i];
+          try {
+            const res = await fetch('/api/notifications', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(authToken && { 'Authorization': `Bearer ${authToken}` })
+              },
+              body: JSON.stringify({
+                type: 'order_updated',
+                payload: { order: { ...order, status: newStatus }, status: newStatus }
+              })
+            });
+            if (!res.ok) failed.push(order.order_number || order.id);
+          } catch {
+            failed.push(order.order_number || order.id);
+          }
+          if (i < eligible.length - 1) await sleep(400);
+        }
+
+        await fetchOrders();
+        setSelectedOrders([]);
+
+        const parts = [`${eligible.length} order${eligible.length === 1 ? '' : 's'} marked ${formatStatus(newStatus)}`];
+        if (skipped > 0) parts.push(`${skipped} skipped (unpaid or cancelled)`);
+        if (failed.length > 0) parts.push(`notification failed for ${failed.join(', ')}`);
+        setNotice({ type: failed.length ? 'error' : 'success', text: parts.join(' · ') });
+      } catch (error: any) {
+        console.error('Error updating orders:', error);
+        setNotice({ type: 'error', text: `Failed to update orders: ${error?.message || 'unknown error'}` });
+      } finally {
+        setBulkWorking(false);
+      }
+    } else if (action === 'Export') {
+      const ordersToExport = orders.filter(o => selectedOrders.includes(o.id));
+      downloadCsv(ordersCsv(ordersToExport), 'selected-orders.csv');
+    }
+  };
+
+  const handleExportAll = () => {
+    downloadCsv(ordersCsv(filteredOrders), 'orders.csv');
   };
 
   const handlePrintInvoice = (orderId: string) => {
@@ -298,44 +336,79 @@ export default function AdminOrdersPage() {
 
   const handleResendPaymentLink = async (order: Order) => {
     setSendingPaymentLink(order.id);
+    setNotice(null);
     try {
-      const response = await fetch('/api/notifications', {
+      await adminFetch('/api/notifications', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'payment_link',
           payload: order
         })
       });
-      
-      if (!response.ok) throw new Error('Failed to send');
-      
-      alert(`Payment link sent to ${order.phone || order.email}`);
-    } catch (error) {
+      setNotice({ type: 'success', text: `Payment link sent to ${order.phone || order.email}` });
+    } catch (error: any) {
       console.error('Error sending payment link:', error);
-      alert('Failed to send payment link');
+      setNotice({ type: 'error', text: `Failed to send payment link: ${error?.message || 'unknown error'}` });
     } finally {
       setSendingPaymentLink(null);
     }
   };
 
-  const filteredOrders = orders.filter(order => {
-    const customerName = getCustomerName(order).toLowerCase();
-    const customerEmail = getCustomerEmail(order).toLowerCase();
-    const orderId = (order.order_number || order.id).toLowerCase();
+  const normalizeMethod = (value?: string | null) => (value || '').toLowerCase().replace(/[\s_-]+/g, '');
 
-    // First filter by view tab (confirmed vs abandoned)
-    const isConfirmed = order.payment_status === 'paid';
-    const matchesViewTab = orderViewTab === 'confirmed' ? isConfirmed : !isConfirmed;
+  const filteredOrders = orders
+    .filter(order => {
+      const customerName = getCustomerName(order).toLowerCase();
+      const customerEmail = getCustomerEmail(order).toLowerCase();
+      const orderId = (order.order_number || order.id).toLowerCase();
 
-    const matchesSearch = orderId.includes(searchQuery.toLowerCase()) ||
-      customerName.includes(searchQuery.toLowerCase()) ||
-      customerEmail.includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
-    const matchesProduct = productFilter === 'all' || 
-      order.order_items?.some((item: any) => item.product_name === productFilter);
-    return matchesViewTab && matchesSearch && matchesStatus && matchesProduct;
-  });
+      // First filter by view tab (confirmed vs abandoned)
+      const matchesViewTab = orderViewTab === 'confirmed' ? isPaidLike(order) : !isPaidLike(order);
+
+      const matchesSearch = orderId.includes(searchQuery.toLowerCase()) ||
+        customerName.includes(searchQuery.toLowerCase()) ||
+        customerEmail.includes(searchQuery.toLowerCase());
+      const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
+      const matchesProduct = productFilter === 'all' ||
+        order.order_items?.some((item: any) => item.product_name === productFilter);
+
+      const created = new Date(order.created_at).getTime();
+      const matchesFrom = !dateFrom || created >= new Date(`${dateFrom}T00:00:00`).getTime();
+      const matchesTo = !dateTo || created <= new Date(`${dateTo}T23:59:59.999`).getTime();
+      const matchesPayment = paymentMethodFilter === 'all' ||
+        normalizeMethod(order.payment_method) === paymentMethodFilter ||
+        normalizeMethod(order.metadata?.payment_gateway) === paymentMethodFilter;
+      const matchesShipping = shippingMethodFilter === 'all' ||
+        normalizeMethod(order.shipping_method) === shippingMethodFilter ||
+        normalizeMethod(order.metadata?.delivery_method) === shippingMethodFilter;
+
+      return matchesViewTab && matchesSearch && matchesStatus && matchesProduct &&
+        matchesFrom && matchesTo && matchesPayment && matchesShipping;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'total') return Number(b.total || 0) - Number(a.total || 0);
+      if (sortBy === 'customer') return getCustomerName(a).localeCompare(getCustomerName(b));
+      if (sortBy === 'status') return (a.status || '').localeCompare(b.status || '');
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+
+  const paymentMethodOptions = Array.from(
+    new Set(
+      orders
+        .flatMap((o) => [o.payment_method, o.metadata?.payment_gateway])
+        .filter(Boolean)
+        .map((m) => normalizeMethod(m))
+    )
+  ).sort();
+  const shippingMethodOptions = Array.from(
+    new Set(
+      orders
+        .flatMap((o) => [o.shipping_method, o.metadata?.delivery_method])
+        .filter(Boolean)
+        .map((m) => normalizeMethod(m))
+    )
+  ).sort();
+  const methodLabel = (m: string) => m.charAt(0).toUpperCase() + m.slice(1);
 
   return (
     <div className="space-y-6">
@@ -406,6 +479,15 @@ export default function AdminOrdersPage() {
       </div>
       )}
 
+      {notice && (
+        <div className={`rounded-lg p-4 text-sm flex items-start justify-between gap-4 border ${notice.type === 'success' ? 'bg-brand-soft text-brand border-brand/30' : 'bg-red-50 text-red-700 border-red-200'}`}>
+          <span>{notice.text}</span>
+          <button onClick={() => setNotice(null)} className="shrink-0 cursor-pointer" aria-label="Dismiss">
+            <i className="ri-close-line text-lg"></i>
+          </button>
+        </div>
+      )}
+
       {/* Abandoned carts info banner */}
       {orderViewTab === 'abandoned' && abandonedCount > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
@@ -469,29 +551,61 @@ export default function AdminOrdersPage() {
           </div>
 
           {showFilters && (
-            <div className="mt-4 p-4 bg-gray-50 rounded-lg grid md:grid-cols-3 gap-4">
+            <div className="mt-4 p-4 bg-gray-50 rounded-lg grid md:grid-cols-4 gap-4">
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Date Range</label>
-                <input type="date" className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm" />
+                <label className="block text-sm font-semibold text-gray-700 mb-2">From</label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">To</label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm"
+                />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Payment Method</label>
-                <select className="w-full px-3 py-2 pr-8 border-2 border-gray-300 rounded-lg text-sm cursor-pointer">
-                  <option>All Methods</option>
-                  <option>Moolre</option>
-                  <option>Mobile Money</option>
-                  <option>Card</option>
+                <select
+                  value={paymentMethodFilter}
+                  onChange={(e) => setPaymentMethodFilter(e.target.value)}
+                  className="w-full px-3 py-2 pr-8 border-2 border-gray-300 rounded-lg text-sm cursor-pointer"
+                >
+                  <option value="all">All Methods</option>
+                  {paymentMethodOptions.map((m) => (
+                    <option key={m} value={m}>{methodLabel(m)}</option>
+                  ))}
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Shipping Method</label>
-                <select className="w-full px-3 py-2 pr-8 border-2 border-gray-300 rounded-lg text-sm cursor-pointer">
-                  <option>All Methods</option>
-                  <option>Standard</option>
-                  <option>Express</option>
-                  <option>Store Pickup</option>
+                <select
+                  value={shippingMethodFilter}
+                  onChange={(e) => setShippingMethodFilter(e.target.value)}
+                  className="w-full px-3 py-2 pr-8 border-2 border-gray-300 rounded-lg text-sm cursor-pointer"
+                >
+                  <option value="all">All Methods</option>
+                  {shippingMethodOptions.map((m) => (
+                    <option key={m} value={m}>{methodLabel(m)}</option>
+                  ))}
                 </select>
               </div>
+              {(dateFrom || dateTo || paymentMethodFilter !== 'all' || shippingMethodFilter !== 'all') && (
+                <div className="md:col-span-4">
+                  <button
+                    onClick={() => { setDateFrom(''); setDateTo(''); setPaymentMethodFilter('all'); setShippingMethodFilter('all'); }}
+                    className="text-sm text-brand font-medium hover:underline cursor-pointer"
+                  >
+                    Clear filters
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -504,13 +618,15 @@ export default function AdminOrdersPage() {
             <div className="flex items-center space-x-2">
               <button
                 onClick={() => handleBulkAction('Mark as Processing', 'processing')}
-                className="px-4 py-2 bg-brand hover:bg-brand-dark text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer"
+                disabled={bulkWorking}
+                className="px-4 py-2 bg-brand hover:bg-brand-dark text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50"
               >
-                Mark Processing
+                {bulkWorking ? 'Working...' : 'Mark Processing'}
               </button>
               <button
                 onClick={() => handleBulkAction('Mark as Packaged', 'shipped')}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer"
+                disabled={bulkWorking}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50"
               >
                 Mark Packaged
               </button>
@@ -630,7 +746,7 @@ export default function AdminOrdersPage() {
                         >
                           <i className="ri-eye-line text-lg w-4 h-4 flex items-center justify-center"></i>
                         </Link>
-                        {orderViewTab === 'abandoned' && order.payment_status !== 'paid' && (
+                        {orderViewTab === 'abandoned' && !isPaidLike(order) && (
                           <button
                             onClick={() => handleResendPaymentLink(order)}
                             disabled={sendingPaymentLink === order.id}

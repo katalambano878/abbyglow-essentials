@@ -51,18 +51,22 @@ export function useStaggeredAnimation(count: number, options: UseScrollAnimation
     const container = containerRef.current;
     if (!container) return;
 
+    const timeouts: ReturnType<typeof setTimeout>[] = [];
+
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
           // Stagger the visibility of each item
           for (let i = 0; i < count; i++) {
-            setTimeout(() => {
-              setVisibleItems(prev => {
-                const newState = [...prev];
-                newState[i] = true;
-                return newState;
-              });
-            }, i * 100); // 100ms delay between each item
+            timeouts.push(
+              setTimeout(() => {
+                setVisibleItems(prev => {
+                  const newState = [...prev];
+                  newState[i] = true;
+                  return newState;
+                });
+              }, i * 100) // 100ms delay between each item
+            );
           }
           observer.unobserve(container);
         }
@@ -74,6 +78,7 @@ export function useStaggeredAnimation(count: number, options: UseScrollAnimation
 
     return () => {
       observer.unobserve(container);
+      timeouts.forEach(clearTimeout);
     };
   }, [count, threshold, rootMargin]);
 

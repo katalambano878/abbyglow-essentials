@@ -4,8 +4,15 @@ import {
   applyPostgrestParams,
 } from "@/lib/db/supabase-compat";
 import { isPlainPostgres } from "@/lib/db/mode";
+import { query } from "@/lib/db/pool";
+import { checkRateLimit, getClientIdentifier } from "@/lib/rate-limit";
 import { resolveRestActor } from "@/lib/db/rest-auth";
-import { authorizeRestTable, type RestMethod } from "@/lib/db/rest-acl";
+import {
+  authorizeEmbeds,
+  authorizeRestTable,
+  sanitizeWriteRow,
+  type RestMethod,
+} from "@/lib/db/rest-acl";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -17,7 +24,9 @@ function corsHeaders(): HeadersInit {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers":
       "authorization, apikey, content-type, prefer, x-client-info, accept-profile, content-profile",
-    "Access-Control-Allow-Methods": "GET,POST,PATCH,PUT,DELETE,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,HEAD,POST,PATCH,PUT,DELETE,OPTIONS",
+    // supabase-js reads the row count from Content-Range on cross-origin dev hosts
+    "Access-Control-Expose-Headers": "content-range, x-cache",
   };
 }
 
@@ -29,6 +38,11 @@ function preferSingle(req: NextRequest): boolean {
 function preferReturn(req: NextRequest): boolean {
   const prefer = req.headers.get("prefer") || "";
   return prefer.includes("return=representation") || prefer.includes("resolution=");
+}
+
+function preferUpsert(req: NextRequest): boolean {
+  const prefer = req.headers.get("prefer") || "";
+  return prefer.includes("resolution=merge-duplicates") || prefer.includes("resolution=ignore-duplicates");
 }
 
 function preferCount(req: NextRequest): boolean {
@@ -52,6 +66,53 @@ function applyForceEq(qb: any, forceEq?: Record<string, string>) {
   return next;
 }
 
+async function hasPurchased(userId: string, productId: string): Promise<boolean> {
+  try {
+    const { rows } = await query(
+      `SELECT 1
+         FROM orders o
+         JOIN order_items oi ON oi.order_id = o.id
+        WHERE o.user_id = $1 AND oi.product_id = $2
+          AND o.payment_status IN ('paid', 'partially_paid')
+        LIMIT 1`,
+      [userId, productId]
+    );
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function ownsOrder(actor: { userId: string | null; email: string | null }, orderId: string): Promise<boolean> {
+  if (!/^[0-9a-f-]{36}$/i.test(orderId)) return false;
+  try {
+    const { rows } = await query<{ user_id: string | null; email: string | null }>(
+      `SELECT user_id, email FROM orders WHERE id = $1 LIMIT 1`,
+      [orderId]
+    );
+    const o = rows[0];
+    if (!o) return false;
+    if (actor.userId && o.user_id === actor.userId) return true;
+    if (actor.email && o.email && o.email.toLowerCase() === actor.email.toLowerCase()) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function ownsReturnRequest(actor: { userId: string | null }, requestId: string): Promise<boolean> {
+  if (!actor.userId || !/^[0-9a-f-]{36}$/i.test(requestId)) return false;
+  try {
+    const { rows } = await query(
+      `SELECT 1 FROM return_requests WHERE id = $1 AND user_id = $2 LIMIT 1`,
+      [requestId, actor.userId]
+    );
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 async function gate(req: NextRequest, table: string, method: RestMethod) {
   const actor = await resolveRestActor(req);
   const decision = authorizeRestTable(actor, table, method);
@@ -72,12 +133,15 @@ export async function GET(
   const { table } = await ctx.params;
   if (!PG_IDENT.test(table)) return jsonError("Invalid table");
 
-  const { decision } = await gate(req, table, "GET");
+  const { actor, decision } = await gate(req, table, "GET");
   if (!decision.allow) return jsonError(decision.message, decision.status);
+
+  const select = req.nextUrl.searchParams.get("select") || "*";
+  const embedDecision = authorizeEmbeds(actor, table, select);
+  if (!embedDecision.allow) return jsonError(embedDecision.message, embedDecision.status);
 
   const client = createClient();
   let qb: any = client.from(table);
-  const select = req.nextUrl.searchParams.get("select") || "*";
   if (preferCount(req)) {
     qb = qb.select(select, {
       count: "exact",
@@ -94,6 +158,14 @@ export async function GET(
   if (decision.forceEq) {
     for (const col of Object.keys(decision.forceEq)) {
       params.delete(col);
+    }
+  }
+  // Cap page size for non-staff callers so the catalog cannot be bulk-scraped
+  // in one request and a bad client cannot pin the pool with huge scans.
+  if (!actor.isStaff && !actor.isServiceRole) {
+    const requested = Number(params.get("limit") || 0);
+    if (!Number.isFinite(requested) || requested <= 0 || requested > 500) {
+      params.set("limit", "500");
     }
   }
   applyPostgrestParams(qb, params, {
@@ -133,46 +205,71 @@ export async function POST(
   const { actor, decision } = await gate(req, table, "POST");
   if (!decision.allow) return jsonError(decision.message, decision.status);
 
+  if (!actor.isStaff && !actor.isServiceRole) {
+    const rl = checkRateLimit(`rest-write:${getClientIdentifier(req)}`, {
+      maxRequests: 30,
+      windowSeconds: 60,
+    });
+    if (!rl.success) return jsonError("Too many requests. Please try again later.", 429);
+  }
+
   const body = await req.json().catch(() => null);
   if (body == null) return jsonError("Invalid JSON body");
 
-  // Prevent privilege escalation on profile create / order user_id spoofing for non-staff
-  let payload = body;
-  if (!actor.isStaff && !actor.isServiceRole && table === "orders") {
-    const rows = Array.isArray(body) ? body : [body];
-    // Never trust client-supplied user_id / payment_status / totals for anon/customer inserts.
-    // Authenticated users bind to their session; guests get null (not a spoofed UUID).
-    payload = rows.map((row: Record<string, unknown>) => {
-      const {
-        user_id: _ignoreUserId,
-        payment_status: _ignorePay,
-        total: _ignoreTotal,
-        subtotal: _ignoreSub,
-        ...safe
-      } = row;
-      return {
-        ...safe,
-        user_id: actor.userId || null,
-        payment_status: "pending",
-        status: typeof row.status === "string" ? row.status : "pending",
-      };
-    });
-    if (!Array.isArray(body)) payload = payload[0];
+  const upsert = preferUpsert(req);
+  if (upsert && !actor.isStaff && !actor.isServiceRole) {
+    return jsonError("Upsert requires admin access", 403);
   }
-  if (!actor.isStaff && !actor.isServiceRole && table === "profiles" && actor.userId) {
+
+  // Non-staff callers may not set ownership / moderation / money columns.
+  let payload: unknown = body;
+  if (!actor.isStaff && !actor.isServiceRole) {
     if (Array.isArray(body)) {
-      payload = body.map((row: Record<string, unknown>) => ({
-        ...row,
-        id: actor.userId,
-        role: "customer",
-      }));
+      if (body.length > 50) return jsonError("Too many rows");
+      payload = body.map((row: Record<string, unknown>) =>
+        sanitizeWriteRow(actor, table, row && typeof row === "object" ? row : {}, "POST")
+      );
+    } else if (typeof body === "object") {
+      payload = sanitizeWriteRow(actor, table, body as Record<string, unknown>, "POST");
     } else {
-      payload = { ...body, id: actor.userId, role: "customer" };
+      return jsonError("Invalid JSON body");
+    }
+  }
+
+  // Server-derived facts for customer-created rows.
+  if (!actor.isStaff && !actor.isServiceRole) {
+    const rows = (Array.isArray(payload) ? payload : [payload]) as Record<string, unknown>[];
+    const t = table.toLowerCase();
+    if (t === "reviews") {
+      for (const row of rows) {
+        const rating = Number(row.rating);
+        if (!Number.isInteger(rating) || rating < 1 || rating > 5) return jsonError("Rating must be 1-5");
+        if (typeof row.product_id !== "string") return jsonError("product_id is required");
+        row.verified_purchase = await hasPurchased(actor.userId!, row.product_id);
+      }
+    }
+    if (t === "return_requests") {
+      for (const row of rows) {
+        if (typeof row.order_id !== "string" || !(await ownsOrder(actor, row.order_id))) {
+          return jsonError("You can only request a return for your own orders", 403);
+        }
+      }
+    }
+    if (t === "return_items") {
+      for (const row of rows) {
+        if (typeof row.return_request_id !== "string" || !(await ownsReturnRequest(actor, row.return_request_id))) {
+          return jsonError("Return request not found", 403);
+        }
+      }
     }
   }
 
   const client = createClient();
-  let qb: any = client.from(table).insert(payload);
+  const onConflict = req.nextUrl.searchParams.get("on_conflict") || "id";
+  if (upsert && !/^[a-z_][a-z0-9_,]*$/i.test(onConflict)) return jsonError("Invalid on_conflict");
+  let qb: any = upsert
+    ? client.from(table).upsert(payload as any, { onConflict })
+    : client.from(table).insert(payload as any);
   if (preferReturn(req) || preferSingle(req)) {
     qb = qb.select("*");
   }
@@ -200,15 +297,28 @@ export async function PATCH(
   const { actor, decision } = await gate(req, table, "PATCH");
   if (!decision.allow) return jsonError(decision.message, decision.status);
 
+  if (!actor.isStaff && !actor.isServiceRole) {
+    const rl = checkRateLimit(`rest-write:${getClientIdentifier(req)}`, {
+      maxRequests: 30,
+      windowSeconds: 60,
+    });
+    if (!rl.success) return jsonError("Too many requests. Please try again later.", 429);
+  }
+
   const body = await req.json().catch(() => null);
   if (body == null || typeof body !== "object") return jsonError("Invalid JSON body");
 
   let patch = { ...body } as Record<string, unknown>;
   if (!actor.isStaff && !actor.isServiceRole) {
-    delete patch.role;
-    delete patch.payment_status;
-    delete patch.total;
-    delete patch.user_id;
+    patch = sanitizeWriteRow(actor, table, patch, "PATCH");
+    if (table.toLowerCase() === "support_tickets") {
+      // Customers can only close their own ticket or edit its description.
+      const next: Record<string, unknown> = {};
+      if (typeof patch.description === "string") next.description = patch.description;
+      if (body.status === "closed") next.status = "closed";
+      patch = next;
+    }
+    if (Object.keys(patch).length === 0) return jsonError("Nothing to update");
   }
 
   const client = createClient();

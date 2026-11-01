@@ -4,14 +4,55 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 
+const LOW_STOCK_THRESHOLD = 10;
+
+const csvCell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+
+/** Minimal RFC-4180 parser: handles quoted cells, escaped quotes and CRLF. */
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { cell += '"'; i++; } else { inQuotes = false; }
+      } else {
+        cell += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(cell); cell = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell); cell = '';
+      if (row.some((c) => c.trim() !== '')) rows.push(row);
+      row = [];
+    } else {
+      cell += ch;
+    }
+  }
+  row.push(cell);
+  if (row.some((c) => c.trim() !== '')) rows.push(row);
+  return rows;
+}
+
+type ImportResult = { updated: string[]; errors: string[] };
+
 export default function InventoryManagementPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [stockFilter, setStockFilter] = useState('all');
   const [showImportModal, setShowImportModal] = useState(false);
-  const [showExportModal, setShowExportModal] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [importFileName, setImportFileName] = useState('');
 
   useEffect(() => {
     fetchInventory();
@@ -28,6 +69,7 @@ export default function InventoryManagementPage() {
           sku,
           price,
           quantity,
+          status,
           categories(name)
         `)
         .order('name');
@@ -36,31 +78,28 @@ export default function InventoryManagementPage() {
 
       if (data) {
         const mapped = data.map((p: any) => {
-          const stock = p.quantity || 0;
+          const stock = Number(p.quantity) || 0;
           let status = 'good';
           if (stock === 0) status = 'out';
-          else if (stock < 10) status = 'low';
+          else if (stock < LOW_STOCK_THRESHOLD) status = 'low';
 
-          // categories is an array from the join
-          const categoryData = p.categories as { name: string }[] | null;
+          // categories is a single object from the forward (fk) embed
           return {
             id: p.id,
             name: p.name,
-            sku: p.sku || 'N/A',
-            category: categoryData?.[0]?.name || 'Uncategorized',
+            sku: p.sku || '',
+            category: p.categories?.name || 'Uncategorized',
             currentStock: stock,
-            reorderLevel: 10, // Default
-            reorderQuantity: 50, // Default
-            price: p.price || 0,
-            cost: 0, // Not in DB
+            price: Number(p.price) || 0,
+            productStatus: p.status,
             status,
-            supplier: 'Standard Supplier' // Default
           };
         });
         setProducts(mapped);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching inventory:', error);
+      setNotice({ type: 'error', text: `Could not load inventory: ${error?.message || 'unknown error'}` });
     } finally {
       setLoading(false);
     }
@@ -78,7 +117,7 @@ export default function InventoryManagementPage() {
 
   const lowStockCount = products.filter(p => p.status === 'low').length;
   const outOfStockCount = products.filter(p => p.status === 'out').length;
-  const totalValue = products.reduce((sum, p) => sum + (p.currentStock * p.price), 0); // Using Price as Value
+  const totalValue = products.reduce((sum, p) => sum + (p.currentStock * p.price), 0);
 
   const toggleProductSelection = (id: string) => {
     setSelectedProducts(prev =>
@@ -94,33 +133,94 @@ export default function InventoryManagementPage() {
     }
   };
 
-  const handleBulkRestock = () => {
-    // Placeholder for bulk restock logic
-    alert("Bulk restock feature coming soon (requires backend logic).");
-    setSelectedProducts([]);
-  };
-
   const handleExportCSV = () => {
+    const rows = selectedProducts.length > 0
+      ? products.filter((p) => selectedProducts.includes(p.id))
+      : filteredProducts;
     const csvData = [
-      ['SKU', 'Product Name', 'Category', 'Current Stock', 'Price', 'Status'],
-      ...products.map(p => [
+      ['SKU', 'Product Name', 'Category', 'Current Stock', 'Price', 'Retail Value', 'Status'],
+      ...rows.map(p => [
         p.sku,
         p.name,
         p.category,
-        p.currentStock.toString(),
+        p.currentStock,
         p.price.toFixed(2),
-        p.status
+        (p.currentStock * p.price).toFixed(2),
+        p.status === 'out' ? 'Out of stock' : p.status === 'low' ? 'Low stock' : 'In stock',
       ])
     ];
 
-    const csvContent = csvData.map(row => row.join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const csvContent = csvData.map(row => row.map(csvCell).join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `inventory-export-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
     a.click();
-    setShowExportModal(false);
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const file = input.files?.[0];
+    if (!file) return;
+    setImportFileName(file.name);
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (rows.length < 2) throw new Error('The file has no data rows.');
+
+      const header = rows[0].map((h) => h.trim().toLowerCase());
+      const skuIdx = header.findIndex((h) => h === 'sku');
+      const qtyIdx = header.findIndex((h) => ['quantity', 'qty', 'stock', 'current stock'].includes(h));
+      const nameIdx = header.findIndex((h) => ['name', 'product name', 'product'].includes(h));
+      if (skuIdx === -1 || qtyIdx === -1) {
+        throw new Error('The header row must contain "sku" and "quantity" columns (a "name" column is optional).');
+      }
+
+      const result: ImportResult = { updated: [], errors: [] };
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const sku = (row[skuIdx] || '').trim();
+        const label = nameIdx >= 0 && row[nameIdx]?.trim() ? `${row[nameIdx].trim()} (${sku || 'no SKU'})` : sku || `row ${i + 1}`;
+        const qtyRaw = (row[qtyIdx] || '').trim();
+        const qty = Number(qtyRaw);
+
+        if (!sku) { result.errors.push(`Row ${i + 1}: missing SKU`); continue; }
+        if (qtyRaw === '' || !Number.isInteger(qty) || qty < 0) {
+          result.errors.push(`${label}: quantity "${qtyRaw}" is not a whole number ≥ 0`);
+          continue;
+        }
+
+        const { data, error } = await supabase
+          .from('products')
+          .update({ quantity: qty, updated_at: new Date().toISOString() })
+          .eq('sku', sku)
+          .select('id');
+        if (error) { result.errors.push(`${label}: ${error.message}`); continue; }
+        if (!data || data.length === 0) { result.errors.push(`${label}: SKU not found`); continue; }
+        result.updated.push(`${label} → ${qty}`);
+      }
+
+      setImportResult(result);
+      if (result.updated.length > 0) await fetchInventory();
+    } catch (err: any) {
+      setImportResult({ updated: [], errors: [err?.message || 'Could not read the file'] });
+    } finally {
+      setImporting(false);
+      input.value = '';
+    }
+  };
+
+  const closeImport = () => {
+    if (importing) return;
+    setShowImportModal(false);
+    setImportResult(null);
+    setImportFileName('');
   };
 
   return (
@@ -129,7 +229,7 @@ export default function InventoryManagementPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Inventory Management</h1>
-            <p className="text-gray-600 mt-1 md:mt-2 text-sm md:text-base">Track stock levels, manage reorders, and forecast demand</p>
+            <p className="text-gray-600 mt-1 md:mt-2 text-sm md:text-base">Track stock levels and update quantities in bulk</p>
           </div>
           <Link
             href="/admin"
@@ -138,6 +238,15 @@ export default function InventoryManagementPage() {
             Back to Dashboard
           </Link>
         </div>
+
+        {notice && (
+          <div className={`mb-6 rounded-lg p-4 text-sm flex items-start justify-between gap-4 border ${notice.type === 'success' ? 'bg-brand-soft text-brand border-brand/30' : 'bg-red-50 text-red-700 border-red-200'}`}>
+            <span>{notice.text}</span>
+            <button onClick={() => setNotice(null)} className="shrink-0 cursor-pointer" aria-label="Dismiss">
+              <i className="ri-close-line text-lg"></i>
+            </button>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className="bg-white rounded-xl shadow-sm p-6">
@@ -232,11 +341,12 @@ export default function InventoryManagementPage() {
               </button>
 
               <button
-                onClick={() => setShowExportModal(true)}
-                className="border-2 border-gray-300 hover:border-gray-400 text-gray-700 px-4 py-3 rounded-lg font-semibold transition-colors flex items-center space-x-2 whitespace-nowrap cursor-pointer"
+                onClick={handleExportCSV}
+                disabled={loading || filteredProducts.length === 0}
+                className="border-2 border-gray-300 hover:border-gray-400 text-gray-700 px-4 py-3 rounded-lg font-semibold transition-colors flex items-center space-x-2 whitespace-nowrap cursor-pointer disabled:opacity-50"
               >
                 <i className="ri-download-line"></i>
-                <span>Export</span>
+                <span>Export{selectedProducts.length > 0 ? ` (${selectedProducts.length})` : ''}</span>
               </button>
             </div>
           </div>
@@ -244,22 +354,14 @@ export default function InventoryManagementPage() {
           {selectedProducts.length > 0 && (
             <div className="mt-4 flex items-center justify-between p-4 bg-brand-soft border border-brand/30 rounded-lg">
               <p className="text-brand font-medium">
-                {selectedProducts.length} product{selectedProducts.length > 1 ? 's' : ''} selected
+                {selectedProducts.length} product{selectedProducts.length > 1 ? 's' : ''} selected — Export downloads only these
               </p>
-              <div className="flex items-center space-x-3">
-                <button
-                  onClick={handleBulkRestock}
-                  className="bg-brand hover:bg-brand-dark text-white px-4 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap cursor-pointer"
-                >
-                  Bulk Restock
-                </button>
-                <button
-                  onClick={() => setSelectedProducts([])}
-                  className="text-gray-600 hover:text-gray-900 font-medium whitespace-nowrap cursor-pointer"
-                >
-                  Clear Selection
-                </button>
-              </div>
+              <button
+                onClick={() => setSelectedProducts([])}
+                className="text-gray-600 hover:text-gray-900 font-medium whitespace-nowrap cursor-pointer"
+              >
+                Clear Selection
+              </button>
             </div>
           )}
         </div>
@@ -304,11 +406,11 @@ export default function InventoryManagementPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div>
-                          <p className="font-semibold text-gray-900">{product.name}</p>
-                          <p className="text-sm text-gray-500">{product.supplier}</p>
+                          <Link href={`/admin/products/${product.id}`} className="font-semibold text-gray-900 hover:text-brand">{product.name}</Link>
+                          <p className="text-sm text-gray-500 capitalize">{product.productStatus || 'active'}</p>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-gray-700">{product.sku}</td>
+                      <td className="px-6 py-4 text-gray-700 font-mono text-sm">{product.sku || '—'}</td>
                       <td className="px-6 py-4 text-gray-700">{product.category}</td>
                       <td className="px-6 py-4">
                         <span className="font-semibold text-gray-900">{product.currentStock}</span>
@@ -340,18 +442,13 @@ export default function InventoryManagementPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center space-x-2">
-                          <button
+                          <Link
+                            href={`/admin/products/${product.id}`}
                             className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-brand transition-colors cursor-pointer"
-                            title="Edit"
+                            title="Edit product"
                           >
                             <i className="ri-edit-line text-lg"></i>
-                          </button>
-                          <button
-                            className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-brand transition-colors cursor-pointer"
-                            title="View Details"
-                          >
-                            <i className="ri-eye-line text-lg"></i>
-                          </button>
+                          </Link>
                         </div>
                       </td>
                     </tr>
@@ -362,8 +459,60 @@ export default function InventoryManagementPage() {
           </div>
         </div>
       </div>
-      {showImportModal && <div className="hidden">Mock Modal</div>}
-      {showExportModal && <div className="hidden">Mock Export</div>}
+
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900">Import stock from CSV</h2>
+              <button onClick={closeImport} className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg cursor-pointer">
+                <i className="ri-close-line text-2xl"></i>
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-600">
+                Upload a CSV with a header row containing <code className="font-mono bg-gray-100 px-1 rounded">sku</code> and{' '}
+                <code className="font-mono bg-gray-100 px-1 rounded">quantity</code> (a <code className="font-mono bg-gray-100 px-1 rounded">name</code> column is optional and only used in the report).
+                Each matching SKU gets its quantity replaced. The Export file uses this same format.
+              </p>
+              <label className={`block border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-brand hover:bg-brand-soft transition-colors cursor-pointer ${importing ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                <i className={`${importing ? 'ri-loader-4-line animate-spin' : 'ri-upload-cloud-line'} text-4xl text-gray-400 mb-2 block`}></i>
+                <p className="text-gray-700 font-medium">{importing ? 'Updating quantities…' : importFileName || 'Click to choose a CSV file'}</p>
+                <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportFile} disabled={importing} />
+              </label>
+
+              {importResult && (
+                <div className="space-y-3">
+                  <div className={`rounded-lg p-3 text-sm border ${importResult.errors.length === 0 ? 'bg-brand-soft text-brand border-brand/30' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
+                    {importResult.updated.length} updated · {importResult.errors.length} skipped
+                  </div>
+                  {importResult.updated.length > 0 && (
+                    <details className="text-sm">
+                      <summary className="cursor-pointer font-semibold text-gray-700">Updated ({importResult.updated.length})</summary>
+                      <ul className="mt-2 space-y-1 text-gray-600 max-h-40 overflow-y-auto">
+                        {importResult.updated.map((line, i) => <li key={i}>{line}</li>)}
+                      </ul>
+                    </details>
+                  )}
+                  {importResult.errors.length > 0 && (
+                    <details open className="text-sm">
+                      <summary className="cursor-pointer font-semibold text-red-700">Errors ({importResult.errors.length})</summary>
+                      <ul className="mt-2 space-y-1 text-red-700 max-h-40 overflow-y-auto">
+                        {importResult.errors.map((line, i) => <li key={i}>{line}</li>)}
+                      </ul>
+                    </details>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="p-6 border-t border-gray-200 flex justify-end bg-gray-50 rounded-b-2xl">
+              <button onClick={closeImport} disabled={importing} className="px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg font-semibold hover:border-gray-400 cursor-pointer disabled:opacity-50">
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

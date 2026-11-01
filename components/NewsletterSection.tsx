@@ -6,18 +6,38 @@ export default function NewsletterSection() {
   const [email, setEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [statusMessage, setStatusMessage] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const trimmed = email.trim();
+    if (!trimmed || !/\S+@\S+\.\S+/.test(trimmed)) {
+      setSubmitStatus('error');
+      setStatusMessage('Please enter a valid email address.');
+      return;
+    }
     setIsSubmitting(true);
     setSubmitStatus('idle');
+    setStatusMessage('');
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      setSubmitStatus('success');
-      setEmail('');
+      const res = await fetch('/api/newsletter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: trimmed, source: 'footer' }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.success) {
+        setSubmitStatus('success');
+        setStatusMessage(json.message || 'Thanks — you are on the list.');
+        setEmail('');
+      } else {
+        setSubmitStatus('error');
+        setStatusMessage(json.message || 'Could not subscribe right now. Please try again.');
+      }
     } catch {
       setSubmitStatus('error');
+      setStatusMessage('Could not subscribe right now. Please check your connection.');
     } finally {
       setIsSubmitting(false);
     }
@@ -63,7 +83,10 @@ export default function NewsletterSection() {
           </div>
         </form>
         {submitStatus === 'success' && (
-          <p className="mt-4 text-sm text-brand-accent">Thanks — you are on the list.</p>
+          <p className="mt-4 text-sm text-brand-accent" role="status">{statusMessage}</p>
+        )}
+        {submitStatus === 'error' && (
+          <p className="mt-4 text-sm text-red-300" role="alert">{statusMessage}</p>
         )}
       </div>
     </section>

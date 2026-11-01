@@ -1,5 +1,5 @@
-// AbbyGlow Essentials Service Worker v2.2 — bust stale logo/hero caches
-const CACHE_VERSION = 'sl-v2.2';
+// AbbyGlow Essentials Service Worker v3.0 — never cache auth/REST/private data
+const CACHE_VERSION = 'sl-v3.0';
 const STATIC_CACHE = `static-${CACHE_VERSION}`;
 const DYNAMIC_CACHE = `dynamic-${CACHE_VERSION}`;
 const IMAGE_CACHE = `images-${CACHE_VERSION}`;
@@ -11,10 +11,13 @@ const STATIC_ASSETS = [
   '/shop',
   '/cart',
   '/wishlist',
-  '/account',
   '/categories',
-  '/offline',
 ];
+const OFFLINE_URL = '/offline';
+
+// Pages that are useless as a cached shell (they need live data or carry
+// personal/payment state) — never stored, never served offline.
+const PRIVATE_PAGE_PREFIXES = ['/account', '/checkout', '/pay/', '/order-success', '/order-tracking', '/auth/', '/returns', '/support/'];
 
 // Cache size limits
 const DYNAMIC_CACHE_LIMIT = 50;
@@ -31,21 +34,25 @@ async function trimCache(cacheName, maxItems) {
   }
 }
 
-// Install: pre-cache static assets
+// Install: pre-cache static assets. The offline page is cached on its own so a
+// single failing shell URL cannot leave us without an offline fallback.
 self.addEventListener('install', (event) => {
-  console.log('[SW] Installing v2.0...');
   event.waitUntil(
-    caches.open(STATIC_CACHE)
-      .then((cache) => {
-        console.log('[SW] Pre-caching app shell');
-        return cache.addAll(STATIC_ASSETS).catch((err) => {
-          console.warn('[SW] Some assets failed to cache:', err);
-          // Don't fail install if some assets fail
-          return Promise.resolve();
-        });
-      })
-      .then(() => self.skipWaiting())
+    caches.open(STATIC_CACHE).then(async (cache) => {
+      await cache.add(OFFLINE_URL).catch((err) => console.warn('[SW] Offline page failed to cache:', err));
+      await Promise.all(
+        STATIC_ASSETS.map((url) => cache.add(url).catch((err) => console.warn('[SW] Failed to cache', url, err)))
+      );
+    })
   );
+});
+
+// The page asks us to activate after the user taps "Update" (see UpdatePrompt).
+// Activating on install would force-reload every open tab mid-checkout.
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 // Activate: clean old caches
@@ -78,9 +85,21 @@ self.addEventListener('fetch', (event) => {
   // Skip chrome-extension, ws, and other non-http
   if (!url.protocol.startsWith('http')) return;
 
-  // Skip API routes that modify data
-  if (url.pathname.startsWith('/api/payment')) return;
-  if (url.pathname.startsWith('/api/notifications')) return;
+  // Only same-origin requests and a short list of CDNs are handled; everything
+  // else goes straight to the network.
+  const sameOrigin = url.origin === self.location.origin;
+
+  // Never touch auth, data APIs, uploads or signed storage: the Cache API matches
+  // by URL, so caching these would persist personal/admin data on disk and serve
+  // it to the next visitor on this browser.
+  if (sameOrigin && (
+    url.pathname.startsWith('/auth/') ||
+    url.pathname.startsWith('/rest/') ||
+    url.pathname.startsWith('/storage/v1/object/sign/') ||
+    (url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/storefront/products') && !url.pathname.startsWith('/api/storefront/categories'))
+  )) {
+    return;
+  }
 
   // Admin: Network only; on failure show "Admin requires internet" (never generic /offline)
   if (url.pathname.startsWith('/admin') && (request.mode === 'navigate' || request.headers.get('accept')?.includes('text/html'))) {
@@ -96,23 +115,29 @@ self.addEventListener('fetch', (event) => {
   }
   if (url.pathname.startsWith('/admin')) return;
 
-  // Strategy: Images - Cache First (long-lived)
+  // Strategy: Images - stale-while-revalidate (served instantly, refreshed in
+  // the background so a re-uploaded product photo shows up on the next view)
   if (
     request.destination === 'image' ||
-    url.pathname.match(/\.(png|jpg|jpeg|gif|webp|svg|ico)$/) ||
-    url.hostname.includes('supabase.co') && url.pathname.includes('/storage/')
+    url.pathname.match(/\.(png|jpg|jpeg|gif|webp|avif|svg|ico)$/) ||
+    (sameOrigin && url.pathname.startsWith('/storage/v1/object/public/')) ||
+    (url.hostname.includes('supabase.co') && url.pathname.includes('/storage/'))
   ) {
     event.respondWith(
       caches.open(IMAGE_CACHE).then((cache) => {
         return cache.match(request).then((cached) => {
-          if (cached) return cached;
-          return fetch(request).then((response) => {
+          const network = fetch(request).then((response) => {
             if (response.ok) {
               cache.put(request, response.clone());
               trimCache(IMAGE_CACHE, IMAGE_CACHE_LIMIT);
             }
             return response;
-          }).catch(() => {
+          });
+          if (cached) {
+            network.catch(() => { });
+            return cached;
+          }
+          return network.catch(() => {
             // Return a placeholder for failed images
             return new Response(
               '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect fill="#f3f4f6" width="200" height="200"/><text fill="#9ca3af" font-family="sans-serif" font-size="14" text-anchor="middle" x="100" y="105">Image unavailable</text></svg>',
@@ -125,8 +150,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Strategy: Storefront API - Network First with cache fallback (short TTL)
-  if (url.pathname.startsWith('/api/storefront')) {
+  // Strategy: public catalog API - Network First with cache fallback (short TTL)
+  if (sameOrigin && (url.pathname.startsWith('/api/storefront/products') || url.pathname.startsWith('/api/storefront/categories'))) {
     event.respondWith(
       fetch(request)
         .then((response) => {
@@ -172,12 +197,14 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Strategy: Pages - Network First with cache fallback
+  // Strategy: Pages - Network First with cache fallback (public pages only)
   if (request.mode === 'navigate' || request.headers.get('accept')?.includes('text/html')) {
+    if (!sameOrigin) return;
+    const isPrivatePage = PRIVATE_PAGE_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
     event.respondWith(
       fetch(request)
         .then((response) => {
-          if (response.ok) {
+          if (response.ok && !isPrivatePage && !url.search) {
             const responseClone = response.clone();
             caches.open(DYNAMIC_CACHE).then((cache) => {
               cache.put(request, responseClone);
@@ -187,28 +214,14 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() => {
-          return caches.match(request).then((cached) => {
-            return cached || caches.match('/offline');
-          });
+          if (isPrivatePage) return caches.match(OFFLINE_URL);
+          return caches.match(request).then((cached) => cached || caches.match(OFFLINE_URL));
         })
     );
     return;
   }
 
-  // Default: Network First
-  event.respondWith(
-    fetch(request)
-      .then((response) => {
-        if (response.ok) {
-          const responseClone = response.clone();
-          caches.open(DYNAMIC_CACHE).then((cache) => {
-            cache.put(request, responseClone);
-          });
-        }
-        return response;
-      })
-      .catch(() => caches.match(request))
-  );
+  // Everything else (Next data, manifest, etc.): network only.
 });
 
 // Background sync for offline actions
@@ -220,7 +233,12 @@ self.addEventListener('sync', (event) => {
 self.addEventListener('push', (event) => {
   if (!event.data) return;
 
-  const data = event.data.json();
+  let data = {};
+  try {
+    data = event.data.json();
+  } catch {
+    data = { body: event.data.text() };
+  }
   const options = {
     body: data.body || 'New update from AbbyGlow Essentials',
     icon: '/icon-192.png',
@@ -270,7 +288,7 @@ self.addEventListener('periodicsync', (event) => {
   if (event.tag === 'update-content') {
     event.waitUntil(
       caches.open(STATIC_CACHE).then((cache) => {
-        return cache.addAll(STATIC_ASSETS).catch(() => { });
+        return Promise.all([OFFLINE_URL, ...STATIC_ASSETS].map((url) => cache.add(url).catch(() => { })));
       })
     );
   }

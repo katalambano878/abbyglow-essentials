@@ -1,26 +1,30 @@
 import Link from 'next/link';
+import { DELIVERY_FEE, FREE_DELIVERY_THRESHOLD } from '@/lib/shipping';
 
 export default function ShippingPage() {
+  // Same numbers the checkout charges (lib/shipping.ts), so this page never promises a different fee.
+  const deliveryCost =
+    DELIVERY_FEE > 0 ? `GHS ${DELIVERY_FEE.toFixed(2)}` : 'FREE';
+  const freeDeliveryNote =
+    DELIVERY_FEE > 0 && FREE_DELIVERY_THRESHOLD > 0
+      ? `Free delivery on orders over GHS ${FREE_DELIVERY_THRESHOLD.toFixed(0)}.`
+      : DELIVERY_FEE > 0
+        ? 'The delivery fee is shown at checkout before you pay.'
+        : 'Delivery is currently free on every order.';
+
   const deliveryOptions = [
     {
-      type: 'Standard Delivery',
-      time: '2-5 Business Days',
-      cost: 'GHS 20',
-      description: 'Perfect for regular orders with no rush',
+      type: 'Home Delivery',
+      time: '1-3 Business Days in Accra',
+      cost: deliveryCost,
+      description: 'Rider delivery to your door; 3-7 business days outside Greater Accra',
       icon: 'ri-truck-line'
-    },
-    {
-      type: 'Express Delivery',
-      time: 'Next Day',
-      cost: 'GHS 40',
-      description: 'Available for Accra & Kumasi orders placed before 2pm',
-      icon: 'ri-rocket-line'
     },
     {
       type: 'Store Pickup',
       time: 'Same Day',
       cost: 'FREE',
-      description: 'Collect from our Accra location',
+      description: 'Collect from our Accra location once we confirm your order',
       icon: 'ri-store-2-line'
     }
   ];
@@ -29,26 +33,22 @@ export default function ShippingPage() {
     {
       zone: 'Zone 1 - Accra Metro',
       areas: 'East Legon, Osu, Labone, Airport, Dzorwulu, Cantonments, Adabraka, Tema',
-      standard: '1-2 days',
-      express: 'Next day'
+      standard: '1-2 days'
     },
     {
       zone: 'Zone 2 - Greater Accra',
       areas: 'Madina, Legon, Haatso, Achimota, Dansoman, Spintex, Teshie, Kasoa',
-      standard: '2-3 days',
-      express: 'Next day'
+      standard: '2-3 days'
     },
     {
       zone: 'Zone 3 - Major Cities',
       areas: 'Kumasi, Takoradi, Cape Coast, Tamale, Sunyani, Ho, Koforidua',
-      standard: '3-4 days',
-      express: '1-2 days'
+      standard: '3-5 days'
     },
     {
       zone: 'Zone 4 - Other Areas',
       areas: 'All other locations within Ghana',
-      standard: '4-5 days',
-      express: 'Not available'
+      standard: '5-7 days'
     }
   ];
 
@@ -59,7 +59,7 @@ export default function ShippingPage() {
           <div className="max-w-3xl mx-auto text-center">
             <h1 className="text-5xl font-bold text-gray-900 mb-6">Shipping & Delivery</h1>
             <p className="text-xl text-gray-600 leading-relaxed">
-              Fast, reliable delivery across Ghana. Free standard shipping on orders over GHS 300.
+              Fast, reliable delivery across Ghana. {freeDeliveryNote}
             </p>
           </div>
         </div>
@@ -87,9 +87,9 @@ export default function ShippingPage() {
           <div className="w-16 h-16 bg-brand rounded-full flex items-center justify-center mx-auto mb-4">
             <i className="ri-gift-line text-3xl text-white"></i>
           </div>
-          <h3 className="text-2xl font-bold text-gray-900 mb-3">Free Standard Shipping</h3>
+          <h3 className="text-2xl font-bold text-gray-900 mb-3">Delivery Fees</h3>
           <p className="text-lg text-gray-600">
-            Spend GHS 300 or more and get <span className="font-bold text-brand">FREE standard delivery</span> anywhere in Ghana
+            {freeDeliveryNote} Store pickup in Accra is <span className="font-bold text-brand">always free</span>.
           </p>
         </div>
 
@@ -103,7 +103,6 @@ export default function ShippingPage() {
                     <th className="px-6 py-4 text-left text-sm font-bold text-gray-900">Zone</th>
                     <th className="px-6 py-4 text-left text-sm font-bold text-gray-900">Areas Covered</th>
                     <th className="px-6 py-4 text-left text-sm font-bold text-gray-900">Standard</th>
-                    <th className="px-6 py-4 text-left text-sm font-bold text-gray-900">Express</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -112,7 +111,6 @@ export default function ShippingPage() {
                       <td className="px-6 py-4 font-medium text-gray-900">{zone.zone}</td>
                       <td className="px-6 py-4 text-gray-600 text-sm">{zone.areas}</td>
                       <td className="px-6 py-4 text-gray-900">{zone.standard}</td>
-                      <td className="px-6 py-4 text-gray-900">{zone.express}</td>
                     </tr>
                   ))}
                 </tbody>

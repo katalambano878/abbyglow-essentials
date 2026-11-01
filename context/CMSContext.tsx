@@ -101,11 +101,67 @@ export function CMSProvider({ children }: { children: ReactNode }) {
     const [banners, setBanners] = useState<Banner[]>([]);
     const [loading, setLoading] = useState(false);
 
-    // CMS Fetching Logic Removed - Content is now managed in code.
-    const fetchCMSData = async () => { };
+    /**
+     * Load site_settings (key/value) and active banners through the public
+     * GET shim. Defaults stay in place when nothing is stored or a request fails.
+     */
+    const fetchCMSData = async () => {
+        setLoading(true);
+        try {
+            const [settingsRes, bannersRes] = await Promise.all([
+                supabase.from('site_settings').select('key, value'),
+                supabase
+                    .from('banners')
+                    .select('id, name, type, title, subtitle, image_url, background_color, text_color, button_text, button_url, is_active, position, start_date, end_date')
+                    .eq('is_active', true),
+            ]);
 
-    // Initial load handled by state defaults
+            if (!settingsRes.error && Array.isArray(settingsRes.data) && settingsRes.data.length > 0) {
+                const merged: SiteSettings = { ...defaultSettings };
+                for (const row of settingsRes.data as Array<{ key?: string; value?: unknown }>) {
+                    if (!row?.key) continue;
+                    const raw = row.value;
+                    let text = '';
+                    if (typeof raw === 'string') text = raw;
+                    else if (typeof raw === 'number' || typeof raw === 'boolean') text = String(raw);
+                    else if (raw && typeof raw === 'object' && 'value' in (raw as Record<string, unknown>)) {
+                        const inner = (raw as Record<string, unknown>).value;
+                        text = inner == null ? '' : String(inner);
+                    }
+                    if (text.trim()) merged[row.key] = text;
+                }
+                setSettings(merged);
+            }
+
+            if (!bannersRes.error && Array.isArray(bannersRes.data)) {
+                setBanners(
+                    (bannersRes.data as Array<Record<string, unknown>>).map((b) => ({
+                        id: String(b.id),
+                        name: String(b.name ?? ''),
+                        type: String(b.type ?? 'promotional'),
+                        title: (b.title as string | null) ?? null,
+                        subtitle: (b.subtitle as string | null) ?? null,
+                        image_url: (b.image_url as string | null) ?? null,
+                        background_color: String(b.background_color ?? '#000000'),
+                        text_color: String(b.text_color ?? '#FFFFFF'),
+                        button_text: (b.button_text as string | null) ?? null,
+                        button_url: (b.button_url as string | null) ?? null,
+                        is_active: b.is_active !== false,
+                        position: String(b.position ?? 'top'),
+                        start_date: (b.start_date as string | null) ?? null,
+                        end_date: (b.end_date as string | null) ?? null,
+                    }))
+                );
+            }
+        } catch (err) {
+            console.error('CMS load failed, using defaults:', err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
+        fetchCMSData();
     }, []);
 
     const getContent = (section: string, blockKey: string): CMSContent | undefined => {

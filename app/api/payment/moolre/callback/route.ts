@@ -12,6 +12,13 @@ import { mapMoolreStatus } from '@/lib/payments/status';
 import { applyOrderPayment } from '@/lib/payments/apply-payment';
 import { query } from '@/lib/db/pool';
 import { isPlainPostgres } from '@/lib/db/mode';
+import { timingSafeEqual } from 'crypto';
+
+function secretMatches(provided: unknown, expected: string): boolean {
+    const a = Buffer.from(String(provided ?? ''));
+    const b = Buffer.from(expected);
+    return a.length === b.length && timingSafeEqual(a, b);
+}
 
 /**
  * Moolre Callback Payload Structure (from their actual API):
@@ -84,7 +91,7 @@ export async function POST(req: Request) {
             }
             console.warn('[Callback] WARNING: MOOLRE_CALLBACK_SECRET not configured (non-production)');
             signatureStatus = 'missing';
-        } else if (!body.secret || body.secret !== expectedSecret) {
+        } else if (!body.secret || !secretMatches(body.secret, expectedSecret)) {
             console.error('[Callback] Secret mismatch or missing! Rejecting callback.');
             await recordCallbackEvent({
                 payload: { keys: Object.keys(body) },

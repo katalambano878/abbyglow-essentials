@@ -19,7 +19,7 @@ export async function initiateMoolrePayment(input: {
 
   let orderQuery = supabaseAdmin
     .from('orders')
-    .select('id, order_number, total, email, payment_status, payment_plan, amount_due_now, amount_paid, balance_due, metadata');
+    .select('id, order_number, total, email, status, payment_status, payment_plan, amount_due_now, amount_paid, balance_due, metadata');
 
   if (UUID_REGEX.test(input.orderId)) {
     orderQuery = orderQuery.eq('id', input.orderId);
@@ -38,6 +38,11 @@ export async function initiateMoolrePayment(input: {
   }
 
   const orderRef = order.order_number || input.orderId;
+  // The pay page only knows a masked email (ab***@x); never forward that to the gateway.
+  const customerEmail =
+    input.customerEmail && !input.customerEmail.includes('*') && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.customerEmail)
+      ? input.customerEmail
+      : order.email;
   const uniqueRef = `${orderRef}-R${Date.now()}`;
   const plan = (order.payment_plan || 'full') as PaymentPlan;
   const purpose = purposeForPlan(plan, charge.kind === 'balance');
@@ -53,7 +58,7 @@ export async function initiateMoolrePayment(input: {
     currency: 'GHS',
     accountnumber: process.env.MOOLRE_ACCOUNT_NUMBER,
     metadata: {
-      customer_email: input.customerEmail || order.email,
+      customer_email: customerEmail,
       original_order_number: orderRef,
       purpose,
       charge_kind: charge.kind,

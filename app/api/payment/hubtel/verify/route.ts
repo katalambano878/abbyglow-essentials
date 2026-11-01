@@ -5,6 +5,8 @@ import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-lim
 import { verifyHubtelTransaction } from '@/lib/payments/hubtel';
 import { applyOrderPayment } from '@/lib/payments/apply-payment';
 import { claimOrderConfirmation } from '@/lib/payments/audit';
+import { query } from '@/lib/db/pool';
+import { isPlainPostgres } from '@/lib/db/mode';
 
 export async function POST(req: Request) {
   try {
@@ -15,7 +17,7 @@ export async function POST(req: Request) {
     }
 
     const { orderNumber } = await req.json();
-    if (!orderNumber || typeof orderNumber !== 'string' || !/^ORD-\d+-\d+$/.test(orderNumber)) {
+    if (!orderNumber || typeof orderNumber !== 'string' || !/^ORD-[A-Z0-9-]{4,40}$/i.test(orderNumber)) {
       return NextResponse.json({ success: false, message: 'Invalid order number' }, { status: 400 });
     }
 
@@ -56,14 +58,30 @@ export async function POST(req: Request) {
       });
     }
 
-    const amount =
-      verified.amount ??
-      (Number(order.amount_paid || 0) > 0
-        ? Number(order.balance_due)
-        : Number(order.amount_due_now ?? order.total));
+    let expectedAmount =
+      Number(order.amount_paid || 0) > 0
+        ? Number(order.balance_due ?? Number(order.total) - Number(order.amount_paid))
+        : Number(order.amount_due_now ?? order.total);
+    if (isPlainPostgres()) {
+      try {
+        const { rows } = await query<{ amount_expected: string }>(
+          `SELECT amount_expected FROM payment_attempts WHERE internal_reference = $1 LIMIT 1`,
+          [String(clientRef)]
+        );
+        if (rows[0]?.amount_expected != null) expectedAmount = Number(rows[0].amount_expected);
+      } catch { /* ignore */ }
+    }
 
-    if (!amount || amount <= 0) {
+    const amount = verified.amount ?? expectedAmount;
+    if (!Number.isFinite(amount) || amount <= 0) {
       return NextResponse.json({ success: false, message: 'Invalid verified amount' }, { status: 400 });
+    }
+    if (Math.abs(amount - expectedAmount) > 0.01) {
+      console.error('[Hubtel verify] AMOUNT MISMATCH. Expected:', expectedAmount, 'Got:', amount);
+      return NextResponse.json(
+        { success: false, payment_status: order.payment_status, message: 'Paid amount does not match the amount due' },
+        { status: 400 }
+      );
     }
 
     const payKind = Number(order.amount_paid || 0) > 0 ? 'balance' : 'checkout';

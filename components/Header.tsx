@@ -3,9 +3,11 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import MiniCart from './MiniCart';
 import BrandLogo from './BrandLogo';
 import { useCart } from '@/context/CartContext';
+import { useWishlist } from '@/context/WishlistContext';
 import { supabase } from '@/lib/supabase';
 
 type ShopPreview = {
@@ -28,22 +30,15 @@ export default function Header() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [wishlistCount, setWishlistCount] = useState(0);
   const [user, setUser] = useState<any>(null);
   const [shopOpen, setShopOpen] = useState(false);
   const [shopProducts, setShopProducts] = useState<ShopPreview[]>([]);
 
+  const router = useRouter();
   const { cartCount, isCartOpen, setIsCartOpen } = useCart();
+  const { wishlistCount } = useWishlist();
 
   useEffect(() => {
-    const updateWishlistCount = () => {
-      const wishlist = JSON.parse(localStorage.getItem('wishlist') || '[]');
-      setWishlistCount(wishlist.length);
-    };
-
-    updateWishlistCount();
-    window.addEventListener('wishlistUpdated', updateWishlistCount);
-
     const checkUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setUser(session?.user ?? null);
@@ -77,15 +72,17 @@ export default function Header() {
     loadShopPreview();
 
     return () => {
-      window.removeEventListener('wishlistUpdated', updateWishlistCount);
       subscription.unsubscribe();
     };
   }, []);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (searchQuery.trim()) {
-      window.location.href = `/shop?search=${encodeURIComponent(searchQuery)}`;
+    const q = searchQuery.trim();
+    if (q) {
+      router.push(`/shop?search=${encodeURIComponent(q)}`);
+      setIsSearchOpen(false);
+      setIsMobileMenuOpen(false);
     }
   };
 

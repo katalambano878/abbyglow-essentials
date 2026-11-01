@@ -13,6 +13,8 @@ export default function AdminCategoriesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -61,15 +63,44 @@ export default function AdminCategoriesPage() {
   };
 
   const handleDelete = async (categoryId: string) => {
-    if (!confirm('Are you sure you want to delete this category? Products in it will have no category.')) return;
+    const category = categories.find((c) => c.id === categoryId);
+    const name = category?.name || 'this category';
+
+    // Refuse while sub-categories still point at it — they would be orphaned.
+    const children = categories.filter((c) => c.parent_id === categoryId);
+    if (children.length > 0) {
+      setNotice({
+        type: 'error',
+        text: `"${name}" has ${children.length} sub-categor${children.length === 1 ? 'y' : 'ies'} (${children.map((c) => c.name).join(', ')}). Move or delete them first.`,
+      });
+      return;
+    }
+
+    if (!confirm(`Delete "${name}"? Products in it will have no category.`)) return;
+    setDeletingId(categoryId);
+    setNotice(null);
     try {
-      await supabase.from('products').update({ category_id: null }).eq('category_id', categoryId);
+      // Re-check on the server in case the list is stale.
+      const { data: childRows, error: childError } = await supabase
+        .from('categories')
+        .select('id, name')
+        .eq('parent_id', categoryId);
+      if (childError) throw childError;
+      if (childRows && childRows.length > 0) {
+        throw new Error(`"${name}" still has sub-categories: ${childRows.map((c: any) => c.name).join(', ')}`);
+      }
+
+      const { error: unlinkError } = await supabase.from('products').update({ category_id: null }).eq('category_id', categoryId);
+      if (unlinkError) throw new Error(`Could not unlink products: ${unlinkError.message}`);
+
       const { error } = await supabase.from('categories').delete().eq('id', categoryId);
       if (error) throw error;
       setCategories(categories.filter((c) => c.id !== categoryId));
-      alert('Category deleted successfully');
+      setNotice({ type: 'success', text: `"${name}" deleted.` });
     } catch (err: any) {
-      alert('Error deleting: ' + (err?.message ?? 'Please try again.'));
+      setNotice({ type: 'error', text: 'Error deleting: ' + (err?.message ?? 'Please try again.') });
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -97,7 +128,7 @@ export default function AdminCategoriesPage() {
       setFormData({ ...formData, image_url: publicUrl });
 
     } catch (error: any) {
-      alert('Error uploading image: ' + error.message);
+      setNotice({ type: 'error', text: 'Error uploading image: ' + error.message });
     } finally {
       setUploading(false);
     }
@@ -105,7 +136,7 @@ export default function AdminCategoriesPage() {
 
   const handleSubmit = async () => {
     if (!formData.name || !formData.slug) {
-      alert('Name and Slug are required');
+      setNotice({ type: 'error', text: 'Name and Slug are required' });
       return;
     }
 
@@ -129,13 +160,13 @@ export default function AdminCategoriesPage() {
           .update(payload)
           .eq('id', editingCategory.id);
         if (error) throw error;
-        alert('Category updated');
+        setNotice({ type: 'success', text: `"${payload.name}" updated.` });
       } else {
         const { error } = await supabase
           .from('categories')
           .insert([payload]);
         if (error) throw error;
-        alert('Category created');
+        setNotice({ type: 'success', text: `"${payload.name}" created.` });
       }
 
       setShowAddModal(false);
@@ -146,7 +177,7 @@ export default function AdminCategoriesPage() {
 
     } catch (err: any) {
       console.error(err);
-      alert('Error saving category: ' + err.message);
+      setNotice({ type: 'error', text: 'Error saving category: ' + err.message });
     } finally {
       setSaving(false);
     }
@@ -182,6 +213,15 @@ export default function AdminCategoriesPage() {
           Add Category
         </button>
       </div>
+
+      {notice && (
+        <div className={`rounded-lg p-4 text-sm flex items-start justify-between gap-4 border ${notice.type === 'success' ? 'bg-brand-soft text-brand border-brand/30' : 'bg-red-50 text-red-700 border-red-200'}`}>
+          <span>{notice.text}</span>
+          <button onClick={() => setNotice(null)} className="shrink-0 cursor-pointer" aria-label="Dismiss">
+            <i className="ri-close-line text-lg"></i>
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl border-2 border-gray-200 p-4">
@@ -262,9 +302,10 @@ export default function AdminCategoriesPage() {
                         </button>
                         <button
                           onClick={() => handleDelete(category.id)}
-                          className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                          disabled={deletingId === category.id}
+                          className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
                         >
-                          <i className="ri-delete-bin-line text-lg w-4 h-4 flex items-center justify-center"></i>
+                          <i className={`${deletingId === category.id ? 'ri-loader-4-line animate-spin' : 'ri-delete-bin-line'} text-lg w-4 h-4 flex items-center justify-center`}></i>
                         </button>
                       </div>
                     </td>

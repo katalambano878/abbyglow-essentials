@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-page-custom-font */
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
+import AnalyticsGate from "@/components/AnalyticsGate";
 import { CartProvider } from "@/context/CartContext";
 import { WishlistProvider } from "@/context/WishlistContext";
 import {
@@ -111,28 +112,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        {/* PWA Meta Tags */}
-        <meta name="theme-color" content="#0A0A0A" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <meta name="apple-mobile-web-app-title" content="AbbyGlow Essentials" />
+        {/* PWA meta not covered by the metadata export (theme-color, apple-* and icons come from `metadata`/`viewport`) */}
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="msapplication-TileColor" content="#0A0A0A" />
         <meta name="msapplication-tap-highlight" content="no" />
-
-        <link rel="icon" href="/favicon.ico" sizes="32x32" />
-        <link rel="icon" href="/favicon.png?v=2" sizes="48x48" type="image/png" />
-        <link rel="icon" href="/icon-192.png?v=2" sizes="192x192" type="image/png" />
-        <link rel="shortcut icon" href="/favicon.png?v=2" />
-
-        {/* Apple Touch Icons from public */}
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2" sizes="180x180" />
         <link rel="apple-touch-startup-image" href="/apple-touch-icon.png?v=2" />
 
-        <link
-          href="https://cdn.jsdelivr.net/npm/remixicon@4.1.0/fonts/remixicon.css"
-          rel="stylesheet"
-        />
+        {/* Remix Icon is loaded once via the @import in globals.css */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Pacifico&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
@@ -151,26 +137,6 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(localBusinessSchema()) }}
         />
       </head>
-
-      {/* Google Analytics */}
-      {GA_MEASUREMENT_ID && (
-        <>
-          <Script
-            src={`https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`}
-            strategy="afterInteractive"
-          />
-          <Script id="google-analytics" strategy="afterInteractive">
-            {`
-              window.dataLayer = window.dataLayer || [];
-              function gtag(){dataLayer.push(arguments);}
-              gtag('js', new Date());
-              gtag('config', '${GA_MEASUREMENT_ID}', {
-                page_path: window.location.pathname,
-              });
-            `}
-          </Script>
-        </>
-      )}
 
       {/* Google reCAPTCHA v3 */}
       {RECAPTCHA_SITE_KEY && (
@@ -194,6 +160,8 @@ export default function RootLayout({
             </div>
           </WishlistProvider>
         </CartProvider>
+        {/* Google Analytics — injected only after analytics cookie consent */}
+        <AnalyticsGate measurementId={GA_MEASUREMENT_ID} />
       </body>
     </html>
   );

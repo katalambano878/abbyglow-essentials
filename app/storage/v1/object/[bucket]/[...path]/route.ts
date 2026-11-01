@@ -7,6 +7,29 @@ import { authorizeStorageWrite } from "@/lib/db/rest-acl";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+const BUCKET_RE = /^[a-z0-9][a-z0-9-_]{0,62}$/;
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const ALLOWED_UPLOAD_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/avif",
+]);
+
+function safeObjectPath(parts: string[]): string | null {
+  const objectPath = parts.map((p) => decodeURIComponent(p)).join("/");
+  if (
+    !objectPath ||
+    objectPath.includes("\0") ||
+    objectPath.split("/").some((seg) => seg === "" || seg === "." || seg === "..") ||
+    objectPath.endsWith(".meta.json")
+  ) {
+    return null;
+  }
+  return objectPath;
+}
+
 function guessContentTypeFromPath(objectPath: string): string {
   const ext = objectPath.toLowerCase().split(".").pop() || "";
   const map: Record<string, string> = {
@@ -39,7 +62,17 @@ export async function POST(
   }
 
   const { bucket, path } = await ctx.params;
-  const objectPath = path.map(decodeURIComponent).join("/");
+  if (!BUCKET_RE.test(bucket)) {
+    return NextResponse.json({ error: "Invalid bucket" }, { status: 400 });
+  }
+  const objectPath = safeObjectPath(path);
+  if (!objectPath) {
+    return NextResponse.json({ error: "Invalid object path" }, { status: 400 });
+  }
+  const declaredLength = Number(req.headers.get("content-length") || 0);
+  if (declaredLength > MAX_UPLOAD_BYTES) {
+    return NextResponse.json({ error: "File too large (max 10 MB)" }, { status: 413 });
+  }
   const upsert = (req.headers.get("x-upsert") || "").toLowerCase() === "true";
   const headerCt = req.headers.get("content-type") || "application/octet-stream";
 
@@ -69,6 +102,16 @@ export async function POST(
       guessContentTypeFromPath(objectPath);
   } else {
     buf = Buffer.from(await req.arrayBuffer());
+  }
+
+  if (buf.length > MAX_UPLOAD_BYTES) {
+    return NextResponse.json({ error: "File too large (max 10 MB)" }, { status: 413 });
+  }
+  if (!ALLOWED_UPLOAD_TYPES.has(contentType.toLowerCase())) {
+    return NextResponse.json(
+      { error: "Only JPEG, PNG, WebP, GIF or AVIF images can be uploaded" },
+      { status: 415 }
+    );
   }
 
   const storage = createStorageClient();
@@ -105,7 +148,13 @@ export async function DELETE(
   }
 
   const { bucket, path } = await ctx.params;
-  const objectPath = path.map(decodeURIComponent).join("/");
+  if (!BUCKET_RE.test(bucket)) {
+    return NextResponse.json({ error: "Invalid bucket" }, { status: 400 });
+  }
+  const objectPath = safeObjectPath(path);
+  if (!objectPath) {
+    return NextResponse.json({ error: "Invalid object path" }, { status: 400 });
+  }
   const storage = createStorageClient();
   const { error } = await storage.from(bucket).remove([objectPath]);
   if (error) {

@@ -1,17 +1,51 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import CheckoutSteps from '@/components/CheckoutSteps';
 import OrderSummary from '@/components/OrderSummary';
+import AdvancedCouponSystem, {
+  type AppliedCoupon,
+  clearStoredCouponCode,
+  previewCoupon,
+  readStoredCouponCode,
+} from '@/components/AdvancedCouponSystem';
 import { useCart } from '@/context/CartContext';
 import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useRecaptcha } from '@/hooks/useRecaptcha';
 import { isPreorderProduct } from '@/lib/preorder';
 import { computePaymentPlan, depositPlanLabel, DEPOSIT_PERCENT } from '@/lib/payments/plans';
-import { SITE_PHONE, toWhatsAppE164 } from '@/lib/seo';
+import { computeShipping, shippingLabel, type DeliveryMethod } from '@/lib/shipping';
+
+const CHECKOUT_EMAIL_KEY = 'abbyglow_checkout_email';
+
+type CreatedOrder = {
+  id: string;
+  order_number: string;
+  total: number;
+  subtotal: number;
+  discount_total: number;
+  shipping_total: number;
+  coupon_code: string | null;
+  tracking_number: string | null;
+  payment_status: string;
+  status: string;
+  payment_plan: string;
+  amount_due_now: number;
+  amount_paid: number;
+  balance_due: number;
+  payment_gateway: string | null;
+};
+
+function rememberCheckoutEmail(email: string) {
+  try {
+    sessionStorage.setItem(CHECKOUT_EMAIL_KEY, email.trim().toLowerCase());
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 export default function CheckoutPage() {
   usePageTitle('Checkout');
@@ -20,9 +54,6 @@ export default function CheckoutPage() {
 
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
-  const [checkoutType, setCheckoutType] = useState<'guest' | 'account'>('guest');
-  const [saveAddress, setSaveAddress] = useState(false);
-  const [savePayment, setSavePayment] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [preorderByProductId, setPreorderByProductId] = useState<Record<string, boolean>>({});
   const { getToken, verifying } = useRecaptcha();
@@ -58,63 +89,36 @@ export default function CheckoutPage() {
     'Western North'
   ];
 
-  const [deliveryMethod, setDeliveryMethod] = useState('pickup');
+  const [deliveryMethod, setDeliveryMethod] = useState<DeliveryMethod>('pickup');
   const [paymentPlan, setPaymentPlan] = useState<'full' | 'deposit_50'>('full');
   const [paymentGateway, setPaymentGateway] = useState<'moolre' | 'hubtel' | ''>('');
   const [gateways, setGateways] = useState<Array<{ id: 'moolre' | 'hubtel'; label: string; configured: boolean }>>([]);
   const [errors, setErrors] = useState<any>({});
+  const [formError, setFormError] = useState('');
+
+  // Coupon (preview only — the final discount comes from the checkout response)
+  const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
+  const [couponNotice, setCouponNotice] = useState('');
+  const lastCouponCheck = useRef<string>('');
+
+  // Order created but the server total differs from what was displayed: confirm before paying
+  const [pendingOrder, setPendingOrder] = useState<CreatedOrder | null>(null);
+
   const cartHasPreorder = cart.some(
     (item) => item.isPreorder === true || preorderByProductId[item.id] === true
   );
 
-  // Store WhatsApp number (E.164, no +) that receives the orders
-  const WHATSAPP_NUMBER = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || toWhatsAppE164(SITE_PHONE);
-
-  const buildWhatsAppMessage = (orderNumber: string, trackingNumber: string) => {
-    const lines = [
-      `Hello AbbyGlow Essentials! I just placed an order on your website.`,
-      ``,
-      `*Order:* ${orderNumber}`,
-      `*Tracking:* ${trackingNumber}`,
-      ``,
-      `*My Items:*`,
-      ...cart.map((item, i) =>
-        `${i + 1}. ${item.name}${item.variant ? ` (${item.variant})` : ''} x${item.quantity} — GH₵${(item.price * item.quantity).toFixed(2)}`
-      ),
-      ``,
-      `*Total: GH₵${total.toFixed(2)}*`,
-      ``,
-      `*Delivery:* ${deliveryMethod === 'pickup' ? 'Store Pickup' : 'Doorstep Delivery'}`,
-      `*Name:* ${shippingData.firstName} ${shippingData.lastName}`,
-      `*Phone:* ${shippingData.phone}`,
-      `*Address:* ${shippingData.address}, ${shippingData.city}, ${shippingData.region}`,
-    ];
-    return lines.join('\n');
-  };
-
-
-
-  // Check auth and cart
+  // Check auth
   useEffect(() => {
     async function checkUser() {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         setUser(session.user);
-        setCheckoutType('account'); // Auto-select account checkout if logged in
-        // Pre-fill email if available
-        setShippingData(prev => ({ ...prev, email: session.user.email || '' }));
+        setShippingData(prev => ({ ...prev, email: session.user.email || prev.email }));
       }
     }
     checkUser();
-
-    // Small delay to ensure cart load
-    const timer = setTimeout(() => {
-      if (cart.length === 0 && !isLoading) {
-        // router.push('/cart'); // Optional: redirect if empty
-      }
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [cart, router, isLoading]);
+  }, []);
 
   // Scroll to top when step changes
   useEffect(() => {
@@ -158,21 +162,62 @@ export default function CheckoutPage() {
     };
   }, [cart]);
 
-  // Calculate Totals
+  // Calculate Totals (same helpers as the server)
   const subtotal = cartSubtotal;
-  const shippingCost = 0; // Delivery options temporarily disabled
+  const couponDiscount = Math.min(appliedCoupon?.discount || 0, subtotal);
+  const discountedSubtotal = Math.max(0, Math.round((subtotal - couponDiscount) * 100) / 100);
+  const shippingCost = appliedCoupon?.freeShipping ? 0 : computeShipping(discountedSubtotal, deliveryMethod);
   const tax = 0; // No Tax
-  const total = subtotal + shippingCost + tax;
+  const total = Math.round((discountedSubtotal + shippingCost + tax) * 100) / 100;
   const effectivePlan = cartHasPreorder ? paymentPlan : 'full';
   const planBreakdown = computePaymentPlan(total, effectivePlan);
   const amountDueNow = planBreakdown.amountDueNow;
   const balanceDue = planBreakdown.balanceDue;
+  const deliveryFeePreview = computeShipping(discountedSubtotal, 'delivery');
+
+  // Re-validate the stored / applied coupon against the current subtotal + email
+  useEffect(() => {
+    const code = appliedCoupon?.code || readStoredCouponCode();
+    if (!code || subtotal <= 0 || pendingOrder) return;
+    const email = /\S+@\S+\.\S+/.test(shippingData.email) ? shippingData.email.trim().toLowerCase() : '';
+    const signature = `${code}|${subtotal}|${email}`;
+    if (lastCouponCheck.current === signature) return;
+    lastCouponCheck.current = signature;
+    let cancelled = false;
+    (async () => {
+      const result = await previewCoupon(code, subtotal, email || undefined);
+      if (cancelled) return;
+      if (result.success) {
+        setAppliedCoupon(result.coupon);
+        setCouponNotice('');
+      } else {
+        setAppliedCoupon(null);
+        clearStoredCouponCode();
+        setCouponNotice(`Coupon ${code} removed: ${result.message}`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [subtotal, shippingData.email, appliedCoupon?.code, pendingOrder]);
 
   useEffect(() => {
     if (!cartHasPreorder && paymentPlan === 'deposit_50') {
       setPaymentPlan('full');
     }
   }, [cartHasPreorder, paymentPlan]);
+
+  const applyCoupon = (coupon: AppliedCoupon) => {
+    const email = /\S+@\S+\.\S+/.test(shippingData.email) ? shippingData.email.trim().toLowerCase() : '';
+    lastCouponCheck.current = `${coupon.code}|${subtotal}|${email}`;
+    setAppliedCoupon(coupon);
+    setCouponNotice('');
+  };
+
+  const removeCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponNotice('');
+  };
 
   const validateShipping = () => {
     const newErrors: any = {};
@@ -199,15 +244,45 @@ export default function CheckoutPage() {
     setCurrentStep(3);
   };
 
+  /** Start the gateway session for an order that already exists. */
+  const initiatePayment = async (order: CreatedOrder) => {
+    rememberCheckoutEmail(shippingData.email);
+    const initiateRes = await fetch('/api/payment/initiate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orderId: order.id,
+        gateway: paymentGateway,
+        purpose: 'checkout',
+        customerPhone: shippingData.phone,
+        customerName: `${shippingData.firstName} ${shippingData.lastName}`.trim(),
+      }),
+    });
+    const initiateResult = await initiateRes.json().catch(() => ({}));
 
+    if (!initiateRes.ok || !initiateResult.success || !initiateResult.url) {
+      // The order exists — never let the customer create a second one. Send them
+      // to the pay page where they can retry.
+      clearCart();
+      router.push(`/pay/${order.id}?notice=start-failed`);
+      return;
+    }
+
+    window.location.href = initiateResult.url;
+  };
 
   const handlePlaceOrder = async () => {
+    setFormError('');
     if (cart.length === 0) {
-      alert('Your cart is empty');
+      setFormError('Your cart is empty.');
       return;
     }
     if (!paymentGateway) {
-      alert('Please select a payment method or contact support.');
+      setFormError('Please select a payment method or contact support.');
+      return;
+    }
+    if (!validateShipping()) {
+      setCurrentStep(1);
       return;
     }
 
@@ -215,7 +290,7 @@ export default function CheckoutPage() {
 
     const isHuman = await getToken('checkout');
     if (!isHuman) {
-      alert('Security verification failed. Please try again.');
+      setFormError('Security verification failed. Please try again.');
       setIsLoading(false);
       return;
     }
@@ -233,82 +308,140 @@ export default function CheckoutPage() {
         body: JSON.stringify({
           items: cart.map((item) => ({
             productId: item.id,
-            variantName: item.variant || null,
+            variantId: item.variantId || undefined,
+            variantName: item.variant || undefined,
             quantity: item.quantity,
           })),
           shipping: shippingData,
           deliveryMethod,
-          paymentPlan: cartHasPreorder ? paymentPlan : 'full',
+          paymentPlan: effectivePlan,
           paymentGateway,
+          couponCode: appliedCoupon?.code || undefined,
         }),
       });
 
       const result = await res.json().catch(() => ({}));
       if (!res.ok || !result.success || !result.order) {
+        if (result.code === 'COUPON_INVALID') {
+          clearStoredCouponCode();
+          setAppliedCoupon(null);
+          setCouponNotice(result.message || 'That coupon is no longer valid.');
+          setFormError(result.message || 'That coupon is no longer valid. Your order was not placed.');
+          return;
+        }
         throw new Error(result.message || 'Failed to place order');
       }
 
-      const order = result.order;
-      const orderNumber = order.order_number as string;
-      const trackingNumber = (order.tracking_number as string) || '';
-
-      const initiateRes = await fetch('/api/payment/initiate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderId: order.id,
-          gateway: paymentGateway,
-          purpose: 'checkout',
-          customerEmail: shippingData.email,
-          customerPhone: shippingData.phone,
-          customerName: `${shippingData.firstName} ${shippingData.lastName}`.trim(),
-        }),
-      });
-
-      const initiateResult = await initiateRes.json().catch(() => ({}));
-
-      if (!initiateRes.ok || !initiateResult.success) {
-        const msg = initiateResult.message || 'Failed to start payment';
-        alert(`${msg}\n\nYou can try again at /pay/${order.id}`);
-        setIsLoading(false);
-        return;
-      }
+      const order = result.order as CreatedOrder;
+      rememberCheckoutEmail(shippingData.email);
+      clearStoredCouponCode();
 
       fetch('/api/notifications', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'order_created',
-          payload: {
-            id: order.id,
-            order_number: orderNumber,
-            email: shippingData.email,
-            phone: shippingData.phone,
-            total: order.total,
-            shipping_address: shippingData,
-            metadata: {
-              tracking_number: trackingNumber,
-              payment_gateway: paymentGateway,
-              payment_plan: order.payment_plan || effectivePlan,
-              amount_due_now: order.amount_due_now ?? amountDueNow,
-            },
-          },
+          payload: { order_number: order.order_number },
         }),
       }).catch((err) => console.error('Notification trigger error:', err));
 
       clearCart();
-      if (initiateResult.url) {
-        window.location.href = initiateResult.url;
-      } else {
-        window.location.href = `/pay/${order.id}`;
+
+      const serverAmount = Number(order.amount_due_now ?? order.total ?? 0);
+      if (Math.abs(serverAmount - amountDueNow) > 0.01) {
+        // Show the server's figure and let the customer confirm before paying.
+        setPendingOrder(order);
+        return;
       }
+
+      await initiatePayment(order);
     } catch (err: any) {
       console.error('Checkout error:', err);
-      alert('Failed to place order: ' + err.message);
+      setFormError(err?.message ? `Failed to place order: ${err.message}` : 'Failed to place order. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
+
+  const handleConfirmPendingPayment = async () => {
+    if (!pendingOrder) return;
+    setIsLoading(true);
+    setFormError('');
+    try {
+      await initiatePayment(pendingOrder);
+    } catch (err: any) {
+      console.error('Payment start error:', err);
+      clearCart();
+      router.push(`/pay/${pendingOrder.id}?notice=start-failed`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (pendingOrder) {
+    const serverAmount = Number(pendingOrder.amount_due_now ?? pendingOrder.total ?? 0);
+    return (
+      <main className="min-h-screen bg-gray-50 py-16">
+        <div className="max-w-lg mx-auto px-4">
+          <div className="bg-white rounded-xl shadow-sm p-6 sm:p-8">
+            <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-5">
+              <i className="ri-information-line text-3xl text-amber-600"></i>
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900 text-center mb-2">Please confirm your total</h1>
+            <p className="text-gray-600 text-center mb-6">
+              Order <span className="font-semibold text-gray-900">{pendingOrder.order_number}</span> has been created.
+              The amount calculated by our server differs from the preview you saw.
+            </p>
+            <div className="space-y-3 mb-6 text-sm">
+              <div className="flex justify-between text-gray-600">
+                <span>Displayed amount</span>
+                <span className="line-through">GH₵ {amountDueNow.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-gray-700">
+                <span>Subtotal</span>
+                <span>GH₵ {Number(pendingOrder.subtotal || 0).toFixed(2)}</span>
+              </div>
+              {Number(pendingOrder.discount_total || 0) > 0 && (
+                <div className="flex justify-between text-gray-700">
+                  <span>Discount{pendingOrder.coupon_code ? ` (${pendingOrder.coupon_code})` : ''}</span>
+                  <span>-GH₵ {Number(pendingOrder.discount_total).toFixed(2)}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-gray-700">
+                <span>Delivery</span>
+                <span>{Number(pendingOrder.shipping_total || 0) > 0 ? `GH₵ ${Number(pendingOrder.shipping_total).toFixed(2)}` : 'Free'}</span>
+              </div>
+              <div className="flex justify-between text-gray-700">
+                <span>Order total</span>
+                <span>GH₵ {Number(pendingOrder.total || 0).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center pt-3 border-t border-gray-200">
+                <span className="text-lg font-semibold text-gray-900">Pay now</span>
+                <span className="text-2xl font-bold text-brand-accent">GH₵ {serverAmount.toFixed(2)}</span>
+              </div>
+            </div>
+            {formError && (
+              <p className="text-sm text-red-600 mb-4 flex items-center">
+                <i className="ri-error-warning-line mr-1"></i>
+                {formError}
+              </p>
+            )}
+            <button
+              onClick={handleConfirmPendingPayment}
+              disabled={isLoading}
+              className="w-full bg-brand-accent hover:bg-brand-accentDark text-white py-4 rounded-lg font-semibold transition-colors disabled:opacity-70 cursor-pointer"
+            >
+              {isLoading ? 'Starting payment…' : `Continue to payment · GH₵ ${serverAmount.toFixed(2)}`}
+            </button>
+            <p className="text-xs text-gray-500 text-center mt-4">
+              Prefer to pay later? Your order stays reserved at{' '}
+              <Link href={`/pay/${pendingOrder.id}`} className="text-brand hover:underline">the payment page</Link>.
+            </p>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   if (cart.length === 0 && !isLoading) {
     return (
@@ -340,49 +473,20 @@ export default function CheckoutPage() {
         <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-8">Checkout</h1>
 
         {currentStep === 1 && (
-          <div className="mb-8 bg-white rounded-xl shadow-sm p-6">
-            <h2 className="text-xl font-bold text-gray-900 mb-6">Checkout As</h2>
-            <div className="grid md:grid-cols-2 gap-4">
-              <button
-                onClick={() => !user && setCheckoutType('guest')}
-                className={`p-6 rounded-xl border-2 transition-all text-left cursor-pointer ${checkoutType === 'guest'
-                  ? 'border-brand bg-brand-soft'
-                  : 'border-gray-200 hover:border-gray-300'
-                  } ${user ? 'opacity-50 cursor-not-allowed' : ''}`}
-                disabled={!!user}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <i className="ri-user-line text-3xl text-brand"></i>
-                  <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${checkoutType === 'guest' ? 'border-brand bg-brand' : 'border-gray-300'
-                    }`}>
-                    {checkoutType === 'guest' && <i className="ri-check-line text-white text-sm"></i>}
-                  </div>
-                </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">Guest Checkout</h3>
-                <p className="text-sm text-gray-600">Quick checkout without creating an account</p>
-                {user && <p className="text-xs text-brand mt-2">You are logged in</p>}
-              </button>
-
-              <button
-                onClick={() => setCheckoutType('account')}
-                className={`p-6 rounded-xl border-2 transition-all text-left cursor-pointer ${checkoutType === 'account'
-                  ? 'border-brand bg-brand-soft'
-                  : 'border-gray-200 hover:border-gray-300'
-                  }`}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <i className="ri-account-circle-line text-3xl text-brand"></i>
-                  <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${checkoutType === 'account' ? 'border-brand bg-brand' : 'border-gray-300'
-                    }`}>
-                    {checkoutType === 'account' && <i className="ri-check-line text-white text-sm"></i>}
-                  </div>
-                </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">{user ? 'My Account' : 'Create Account'}</h3>
-                <p className="text-sm text-gray-600">
-                  {user ? `Logged in as ${user.email}` : 'Save info, track orders & earn loyalty points'}
-                </p>
-              </button>
-            </div>
+          <div className="mb-8 bg-white rounded-xl shadow-sm p-4 sm:p-5 flex items-center gap-3 text-sm">
+            <i className={`${user ? 'ri-account-circle-line' : 'ri-user-line'} text-2xl text-brand`}></i>
+            {user ? (
+              <p className="text-gray-700">
+                Checking out as <span className="font-semibold text-gray-900">{user.email}</span>. Your order will appear in{' '}
+                <Link href="/account?tab=orders" className="text-brand hover:underline">your account</Link>.
+              </p>
+            ) : (
+              <p className="text-gray-700">
+                Checking out as a guest.{' '}
+                <Link href="/auth/login?redirect=/checkout" className="text-brand hover:underline font-semibold">Sign in</Link>{' '}
+                to track orders from your account.
+              </p>
+            )}
           </div>
         )}
 
@@ -507,17 +611,6 @@ export default function CheckoutPage() {
                       </div>
                     </div>
 
-                    {checkoutType === 'account' && (
-                      <label className="flex items-center space-x-3 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={saveAddress}
-                          onChange={(e) => setSaveAddress(e.target.checked)}
-                          className="w-5 h-5 text-brand rounded border-gray-300 focus:ring-brand"
-                        />
-                        <span className="text-sm text-gray-700">Save this address for future orders</span>
-                      </label>
-                    )}
                   </div>
 
                   <button
@@ -545,7 +638,7 @@ export default function CheckoutPage() {
                           name="delivery"
                           value="pickup"
                           checked={deliveryMethod === 'pickup'}
-                          onChange={(e) => setDeliveryMethod(e.target.value)}
+                          onChange={() => setDeliveryMethod('pickup')}
                           className="w-5 h-5 text-brand"
                         />
                         <div>
@@ -556,49 +649,28 @@ export default function CheckoutPage() {
                       <p className="font-bold text-brand">FREE</p>
                     </label>
 
-                    <label className={`flex items-center justify-between p-4 border-2 rounded-lg cursor-pointer transition-colors ${deliveryMethod === 'doorstep' ? 'border-brand bg-brand-soft' : 'border-gray-300 hover:border-gray-400'
+                    <label className={`flex items-center justify-between p-4 border-2 rounded-lg cursor-pointer transition-colors ${deliveryMethod === 'delivery' ? 'border-brand bg-brand-soft' : 'border-gray-300 hover:border-gray-400'
                       }`}>
                       <div className="flex items-center space-x-4">
                         <input
                           type="radio"
                           name="delivery"
-                          value="doorstep"
-                          checked={deliveryMethod === 'doorstep'}
-                          onChange={(e) => setDeliveryMethod(e.target.value)}
+                          value="delivery"
+                          checked={deliveryMethod === 'delivery'}
+                          onChange={() => setDeliveryMethod('delivery')}
                           className="w-5 h-5 text-brand"
                         />
                         <div>
                           <p className="font-semibold text-gray-900">Doorstep Delivery</p>
-                          <p className="text-sm text-gray-600">We will contact you with the delivery cost</p>
+                          <p className="text-sm text-gray-600">
+                            Delivered to {shippingData.city || 'your address'}{shippingData.region ? `, ${shippingData.region}` : ''}
+                          </p>
                         </div>
                       </div>
-                      <p className="font-semibold text-amber-600 text-sm">At a Cost</p>
+                      <p className={`font-bold ${deliveryFeePreview > 0 && !appliedCoupon?.freeShipping ? 'text-gray-900' : 'text-brand'}`}>
+                        {appliedCoupon?.freeShipping ? 'FREE' : shippingLabel(deliveryFeePreview, 'delivery').replace('Free delivery', 'FREE')}
+                      </p>
                     </label>
-
-                    {/* Comprehensive delivery options - to be re-enabled later
-                    <label className={`flex items-center justify-between p-4 border-2 rounded-lg cursor-pointer transition-colors ${deliveryMethod === 'accra' ? 'border-brand bg-brand-soft' : 'border-gray-300 hover:border-gray-400'
-                      }`}>
-                      <div className="flex items-center space-x-4">
-                        <input type="radio" name="delivery" value="accra" checked={deliveryMethod === 'accra'} onChange={(e) => setDeliveryMethod(e.target.value)} className="w-5 h-5 text-brand" />
-                        <div>
-                          <p className="font-semibold text-gray-900">Accra Delivery</p>
-                          <p className="text-sm text-gray-600">Delivery within Accra</p>
-                        </div>
-                      </div>
-                      <p className="font-bold text-gray-900">GH₵ 40.00</p>
-                    </label>
-                    <label className={`flex items-center justify-between p-4 border-2 rounded-lg cursor-pointer transition-colors ${deliveryMethod === 'outside-accra' ? 'border-brand bg-brand-soft' : 'border-gray-300 hover:border-gray-400'
-                      }`}>
-                      <div className="flex items-center space-x-4">
-                        <input type="radio" name="delivery" value="outside-accra" checked={deliveryMethod === 'outside-accra'} onChange={(e) => setDeliveryMethod(e.target.value)} className="w-5 h-5 text-brand" />
-                        <div>
-                          <p className="font-semibold text-gray-900">Outside Accra Delivery</p>
-                          <p className="text-sm text-gray-600">Delivery to bus stations (VIP, OA, STC, etc.)</p>
-                        </div>
-                      </div>
-                      <p className="font-bold text-gray-900">GH₵ 30.00</p>
-                    </label>
-                    */}
                   </div>
 
                   <div className="flex flex-col-reverse md:flex-row gap-4 mt-6">
@@ -719,6 +791,15 @@ export default function CheckoutPage() {
                     </div>
                   )}
 
+                  {formError && (
+                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg mb-2">
+                      <p className="text-sm text-red-700 flex items-start">
+                        <i className="ri-error-warning-line mr-2 mt-0.5"></i>
+                        <span>{formError}</span>
+                      </p>
+                    </div>
+                  )}
+
                   <div className="flex flex-col-reverse md:flex-row gap-4 mt-6">
                     <button
                       onClick={() => setCurrentStep(2)}
@@ -729,10 +810,10 @@ export default function CheckoutPage() {
                     </button>
                     <button
                       onClick={handlePlaceOrder}
-                      disabled={isLoading || !paymentGateway}
+                      disabled={isLoading || verifying || !paymentGateway}
                       className="flex-1 bg-brand-accent hover:bg-brand-accentDark text-white py-4 rounded-lg font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-70 flex items-center justify-center"
                     >
-                      {isLoading ? (
+                      {isLoading || verifying ? (
                         <>
                           <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -754,13 +835,26 @@ export default function CheckoutPage() {
             <OrderSummary
               items={cart}
               subtotal={subtotal}
+              discount={couponDiscount}
+              discountLabel={appliedCoupon ? `Coupon (${appliedCoupon.code})` : undefined}
               shipping={shippingCost}
+              shippingText={shippingLabel(shippingCost, deliveryMethod)}
               tax={tax}
               total={total}
               paymentPlan={currentStep >= 3 ? effectivePlan : undefined}
               amountDueNow={currentStep >= 3 ? amountDueNow : undefined}
               balanceDue={currentStep >= 3 ? balanceDue : undefined}
-            />
+            >
+              <AdvancedCouponSystem
+                subtotal={subtotal}
+                email={/\S+@\S+\.\S+/.test(shippingData.email) ? shippingData.email.trim().toLowerCase() : undefined}
+                onApply={applyCoupon}
+                onRemove={removeCoupon}
+                appliedCoupon={appliedCoupon}
+                notice={couponNotice}
+                compact
+              />
+            </OrderSummary>
           </div>
         </div>
       </div>

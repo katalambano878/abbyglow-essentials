@@ -1,34 +1,103 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import { useCart } from '@/context/CartContext';
 import PageHero from '@/components/PageHero';
 import { useWishlist } from '@/context/WishlistContext';
 import ProductCard from '@/components/ProductCard';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import { supabase } from '@/lib/supabase';
+import { isPreorderProduct } from '@/lib/preorder';
+
+const PLACEHOLDER = '/images/placeholder-product.svg';
 
 export default function WishlistPage() {
   usePageTitle('Wishlist');
   const { wishlist: wishlistItems, removeFromWishlist } = useWishlist();
-  const { addToCart } = useCart();
+  const { addToCart, setIsCartOpen } = useCart();
+  const [adding, setAdding] = useState(false);
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [shareNotice, setShareNotice] = useState('');
 
-  const addAllToCart = () => {
-    const inStockItems = wishlistItems.filter(item => item.inStock);
-    inStockItems.forEach(item => {
-      // Convert WishlistItem to CartItem if necessary, or assume compatibility
-      addToCart({
-        id: item.id,
-        name: item.name,
-        price: item.price,
-        image: item.image,
-        quantity: 1,
-        slug: item.slug || item.id, // Fallback
-        maxStock: 99 // Default
+  const addAllToCart = async () => {
+    if (wishlistItems.length === 0) return;
+    setAdding(true);
+    setNotice(null);
+    try {
+      const ids = wishlistItems.map((i) => i.id);
+      const { data, error } = await supabase
+        .from('products')
+        .select('id, name, slug, price, quantity, status, metadata, product_images(url)')
+        .in('id', ids);
+      if (error) throw error;
+
+      const byId = new Map<string, any>((data || []).map((p: any) => [p.id, p]));
+      let added = 0;
+      const skipped: string[] = [];
+      for (const item of wishlistItems) {
+        const product = byId.get(item.id);
+        if (!product || product.status !== 'active') {
+          skipped.push(item.name);
+          continue;
+        }
+        const preorder = isPreorderProduct(product.metadata);
+        const stock = Number(product.quantity) || 0;
+        if (!preorder && stock <= 0) {
+          skipped.push(product.name);
+          continue;
+        }
+        addToCart({
+          id: product.id,
+          name: product.name,
+          price: Number(product.price) || 0,
+          image: product.product_images?.[0]?.url || item.image || PLACEHOLDER,
+          quantity: 1,
+          slug: product.slug || item.slug || item.id,
+          maxStock: preorder ? 999 : stock,
+          isPreorder: preorder,
+        });
+        added += 1;
+      }
+      if (added === 0) {
+        setNotice({ type: 'error', text: 'None of your saved items are available right now.' });
+        return;
+      }
+      setIsCartOpen(true);
+      setNotice({
+        type: 'success',
+        text:
+          skipped.length > 0
+            ? `Added ${added} item${added === 1 ? '' : 's'} to your cart. Unavailable: ${skipped.join(', ')}.`
+            : `Added ${added} item${added === 1 ? '' : 's'} to your cart.`,
       });
-    });
-    if (inStockItems.length > 0) {
-      alert(`Added ${inStockItems.length} items to cart`);
+    } catch (err: any) {
+      setNotice({ type: 'error', text: err?.message || 'Could not add your items right now.' });
+    } finally {
+      setAdding(false);
     }
+  };
+
+  const buildShareText = () => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const lines = wishlistItems.map(
+      (item) => `• ${item.name} — ${origin}/product/${item.slug || item.id}`
+    );
+    return `My AbbyGlow wishlist:\n${lines.join('\n')}`;
+  };
+
+  const shareWhatsApp = () => {
+    window.open(`https://wa.me/?text=${encodeURIComponent(buildShareText())}`, '_blank', 'noopener');
+  };
+
+  const copyShareText = async () => {
+    try {
+      await navigator.clipboard.writeText(buildShareText());
+      setShareNotice('Wishlist copied — paste it anywhere.');
+    } catch {
+      setShareNotice('Could not copy automatically. Select the items above and copy them manually.');
+    }
+    setTimeout(() => setShareNotice(''), 3000);
   };
 
   return (
@@ -51,12 +120,22 @@ export default function WishlistPage() {
             {wishlistItems.length > 0 && (
               <button
                 onClick={addAllToCart}
-                className="bg-brand-accent hover:bg-brand-accentDark text-white px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap"
+                disabled={adding}
+                className="bg-brand-accent hover:bg-brand-accentDark text-white px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap disabled:opacity-50"
               >
-                Add All to Cart
+                {adding ? 'Adding...' : 'Add All to Cart'}
               </button>
             )}
           </div>
+          {notice && (
+            <div
+              className={`mt-4 p-3 rounded-lg text-sm flex items-start gap-2 ${notice.type === 'success' ? 'bg-brand-soft text-brand border border-brand/20' : 'bg-red-50 text-red-700 border border-red-100'}`}
+              role="status"
+            >
+              <i className={`${notice.type === 'success' ? 'ri-checkbox-circle-line' : 'ri-error-warning-line'} mt-0.5`}></i>
+              <span>{notice.text}</span>
+            </div>
+          )}
         </div>
       </section>
 
@@ -110,22 +189,31 @@ export default function WishlistPage() {
               <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-gray-900 mb-4 tracking-tight drop-shadow-sm">Share Your Wishlist</h2>
               <p className="text-gray-500 mb-12 text-lg sm:text-xl font-light max-w-lg mx-auto leading-relaxed">Let friends and family know exactly what you love.</p>
 
-              <div className="flex items-center justify-center gap-4 sm:gap-6">
-                {[
-                  { icon: 'ri-facebook-fill' },
-                  { icon: 'ri-twitter-x-fill' },
-                  { icon: 'ri-whatsapp-fill' },
-                  { icon: 'ri-mail-fill' },
-                ].map((item, idx) => (
-                  <button
-                    key={idx}
-                    className="group/btn relative w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center rounded-full bg-white border border-gray-200 text-gray-400 hover:text-gray-900 hover:border-gray-300 hover:shadow-[0_8px_20px_-6px_rgba(0,0,0,0.1)] hover:-translate-y-1 transition-all duration-300 active:scale-95"
-                  >
-                    <i className={`${item.icon} text-xl sm:text-2xl transition-transform duration-300 group-hover/btn:scale-110`}></i>
-                    <div className="absolute inset-0 rounded-full bg-gray-50 opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300 -z-10"></div>
-                  </button>
-                ))}
-              </div>
+              {wishlistItems.length === 0 ? (
+                <p className="text-sm text-gray-400">Save a few products first, then share them from here.</p>
+              ) : (
+                <>
+                  <div className="flex items-center justify-center gap-4 sm:gap-6">
+                    <button
+                      onClick={shareWhatsApp}
+                      aria-label="Share on WhatsApp"
+                      className="group/btn relative w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center rounded-full bg-white border border-gray-200 text-gray-400 hover:text-gray-900 hover:border-gray-300 hover:shadow-[0_8px_20px_-6px_rgba(0,0,0,0.1)] hover:-translate-y-1 transition-all duration-300 active:scale-95"
+                    >
+                      <i className="ri-whatsapp-fill text-xl sm:text-2xl transition-transform duration-300 group-hover/btn:scale-110"></i>
+                      <div className="absolute inset-0 rounded-full bg-gray-50 opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300 -z-10"></div>
+                    </button>
+                    <button
+                      onClick={copyShareText}
+                      aria-label="Copy wishlist"
+                      className="group/btn relative w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center rounded-full bg-white border border-gray-200 text-gray-400 hover:text-gray-900 hover:border-gray-300 hover:shadow-[0_8px_20px_-6px_rgba(0,0,0,0.1)] hover:-translate-y-1 transition-all duration-300 active:scale-95"
+                    >
+                      <i className="ri-file-copy-line text-xl sm:text-2xl transition-transform duration-300 group-hover/btn:scale-110"></i>
+                      <div className="absolute inset-0 rounded-full bg-gray-50 opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300 -z-10"></div>
+                    </button>
+                  </div>
+                  {shareNotice && <p className="mt-6 text-sm text-gray-500" role="status">{shareNotice}</p>}
+                </>
+              )}
             </div>
           </div>
         </div>

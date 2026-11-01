@@ -5,6 +5,7 @@ export type ChargePurpose = 'checkout' | 'balance';
 
 export type OrderMoneyFields = {
   total: number | string;
+  status?: string | null;
   payment_plan?: string | null;
   payment_status?: string | null;
   amount_due_now?: number | string | null;
@@ -27,6 +28,13 @@ export function getChargeableAmount(
     Math.round((total - paid) * 100) / 100
   );
 
+  const orderStatus = String(order.status || '').toLowerCase();
+  if (orderStatus === 'cancelled' || orderStatus === 'refunded') {
+    return { amount: 0, kind: purpose, error: `This order has been ${orderStatus} and can no longer be paid` };
+  }
+  if (order.payment_status === 'refunded') {
+    return { amount: 0, kind: purpose, error: 'This order has been refunded' };
+  }
   if (order.payment_status === 'paid' || remaining <= 0.01) {
     return { amount: 0, kind: purpose, error: 'Order is already paid' };
   }

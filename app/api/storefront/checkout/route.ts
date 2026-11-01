@@ -6,6 +6,9 @@ import { isPlainPostgres } from '@/lib/db/mode';
 import { computePaymentPlan, type PaymentPlan } from '@/lib/payments/plans';
 import { isGatewayConfigured, parseGateway } from '@/lib/payments/gateways';
 import { getPreorderShippingNote, isPreorderProduct } from '@/lib/preorder';
+import { computeShipping, parseDeliveryMethod } from '@/lib/shipping';
+import { recordCouponUse, validateCoupon } from '@/lib/coupons';
+import { generateOrderNumber, generateTrackingNumber } from '@/lib/order-number';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -53,7 +56,8 @@ export async function POST(req: Request) {
     const address = String(shipping.address || '').trim();
     const city = String(shipping.city || '').trim();
     const region = String(shipping.region || '').trim();
-    const deliveryMethod = String(body.deliveryMethod || 'pickup');
+    const deliveryMethod = parseDeliveryMethod(body.deliveryMethod);
+    const couponCode = typeof body.couponCode === 'string' ? body.couponCode.trim() : '';
     const paymentPlanRaw = String(body.paymentPlan || 'full');
     const paymentGateway = parseGateway(body.paymentGateway || body.paymentMethod);
     if (!paymentGateway || !isGatewayConfigured(paymentGateway)) {
@@ -67,8 +71,16 @@ export async function POST(req: Request) {
     if (!email || !phone || !firstName || !lastName || !address || !city || !region) {
       return NextResponse.json({ success: false, message: 'Incomplete shipping details' }, { status: 400 });
     }
-    if (!/\S+@\S+\.\S+/.test(email)) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
       return NextResponse.json({ success: false, message: 'Invalid email' }, { status: 400 });
+    }
+    if (phone.replace(/\D/g, '').length < 9) {
+      return NextResponse.json({ success: false, message: 'Enter a valid phone number' }, { status: 400 });
+    }
+    for (const [label, value] of [['name', firstName + lastName], ['address', address], ['city', city], ['region', region]] as const) {
+      if (value.length > 200) {
+        return NextResponse.json({ success: false, message: `The ${label} is too long` }, { status: 400 });
+      }
     }
 
     // Optional auth — attach user_id when JWT present
@@ -103,7 +115,7 @@ export async function POST(req: Request) {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(productId);
       let productQuery = supabaseAdmin
         .from('products')
-        .select('id, name, price, quantity, status, sku, metadata');
+        .select('id, name, slug, price, quantity, status, sku, metadata, product_images(url, position)');
       productQuery = isUuid
         ? productQuery.eq('id', productId)
         : productQuery.eq('slug', productId);
@@ -119,9 +131,13 @@ export async function POST(req: Request) {
       let sku: string | null = product.sku || null;
       let stock = Number(product.quantity ?? 0);
       const productIsPreorder = isPreorderProduct(product.metadata);
+      const images = Array.isArray(product.product_images) ? [...product.product_images] : [];
+      images.sort((a: any, b: any) => Number(a?.position ?? 0) - Number(b?.position ?? 0));
       const meta: Record<string, unknown> = {
         is_preorder: productIsPreorder,
         preorder_shipping: getPreorderShippingNote(product.metadata),
+        image: images[0]?.url || null,
+        product_slug: product.slug || null,
       };
 
       if (line.variantId) {
@@ -141,24 +157,38 @@ export async function POST(req: Request) {
         stock = Number(variant.quantity ?? stock);
         meta.variant_id = variant.id;
       } else if (variantName) {
-        const { data: variant } = await supabaseAdmin
+        // Legacy carts only carry the variant label. Match it exactly; if the
+        // product has variants and none matches, refuse rather than silently
+        // charging the base price for a different option.
+        const { data: variants } = await supabaseAdmin
           .from('product_variants')
           .select('id, name, price, quantity, sku, product_id')
-          .eq('product_id', product.id)
-          .eq('name', variantName)
-          .maybeSingle();
+          .eq('product_id', product.id);
+        const list = (variants || []) as Array<{ id: string; name: string; price: number | null; quantity: number | null; sku: string | null }>;
+        const wanted = variantName.toLowerCase();
+        const variant = list.find((v) => {
+          const n = String(v.name || '').toLowerCase();
+          return n === wanted || wanted.endsWith(`/ ${n}`) || wanted.startsWith(`${n} /`);
+        });
         if (variant) {
           unitPrice = Number(variant.price ?? unitPrice);
+          variantName = variant.name;
           sku = variant.sku || sku;
           stock = Number(variant.quantity ?? stock);
           meta.variant_id = variant.id;
+        } else if (list.length > 0) {
+          return NextResponse.json(
+            { success: false, message: `The selected option for ${product.name} is no longer available. Please choose it again.` },
+            { status: 400 }
+          );
         }
       }
 
       if (!Number.isFinite(unitPrice) || unitPrice < 0) {
         return NextResponse.json({ success: false, message: 'Invalid product price' }, { status: 400 });
       }
-      if (stock < qty) {
+      // Pre-order products are sold ahead of stock arriving; everything else must be in stock.
+      if (!productIsPreorder && stock < qty) {
         return NextResponse.json(
           { success: false, message: `Insufficient stock for ${product.name}` },
           { status: 400 }
@@ -180,19 +210,34 @@ export async function POST(req: Request) {
     }
 
     subtotal = Math.round(subtotal * 100) / 100;
-    const shippingCost = 0;
+
+    // Coupon (validated server-side against the staff-only coupons table)
+    let discount = 0;
+    let couponId: string | null = null;
+    let couponApplied: string | null = null;
+    let couponFreeShipping = false;
+    if (couponCode) {
+      const coupon = await validateCoupon(couponCode, subtotal, { email });
+      if (!coupon.ok) {
+        return NextResponse.json({ success: false, message: coupon.message, code: 'COUPON_INVALID' }, { status: 400 });
+      }
+      discount = coupon.discount;
+      couponId = coupon.coupon.id;
+      couponApplied = coupon.coupon.code;
+      couponFreeShipping = coupon.freeShipping;
+    }
+
+    const discountedSubtotal = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
+    const shippingCost = couponFreeShipping ? 0 : computeShipping(discountedSubtotal, deliveryMethod);
     const tax = 0;
-    const total = Math.round((subtotal + shippingCost + tax) * 100) / 100;
+    const total = Math.round((discountedSubtotal + shippingCost + tax) * 100) / 100;
     const cartHasPreorder = lineRows.some((line) => line.metadata.is_preorder === true);
     const paymentPlan: PaymentPlan =
       paymentPlanRaw === 'deposit_50' && cartHasPreorder ? 'deposit_50' : 'full';
     const planBreakdown = computePaymentPlan(total, paymentPlan);
 
-    const orderNumber = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    const trackingId = Array.from({ length: 6 }, () =>
-      'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]
-    ).join('');
-    const trackingNumber = `SLI-${trackingId}`;
+    const orderNumber = generateOrderNumber();
+    const trackingNumber = generateTrackingNumber();
 
     const shippingAddress = {
       firstName,
@@ -218,7 +263,7 @@ export async function POST(req: Request) {
           subtotal,
           tax_total: tax,
           shipping_total: shippingCost,
-          discount_total: 0,
+          discount_total: discount,
           total,
           payment_plan: planBreakdown.plan,
           amount_due_now: planBreakdown.amountDueNow,
@@ -237,6 +282,9 @@ export async function POST(req: Request) {
             checkout_source: 'server_checkout',
             payment_gateway: paymentGateway,
             payment_plan: planBreakdown.plan,
+            delivery_method: deliveryMethod,
+            coupon_code: couponApplied,
+            coupon_discount: discount,
           },
         },
       ])
@@ -263,8 +311,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: 'Failed to create order items' }, { status: 500 });
     }
 
+    if (couponId) await recordCouponUse(couponId);
+
     try {
-      await supabaseAdmin.rpc('upsert_customer_from_order', {
+      const { error: customerError } = await supabaseAdmin.rpc('upsert_customer_from_order', {
         p_email: email,
         p_phone: phone,
         p_full_name: `${firstName} ${lastName}`.trim(),
@@ -273,8 +323,9 @@ export async function POST(req: Request) {
         p_user_id: userId,
         p_address: shippingAddress,
       });
-    } catch {
-      // non-fatal
+      if (customerError) console.error('[Checkout] upsert_customer_from_order failed:', customerError.message || customerError);
+    } catch (err: any) {
+      console.error('[Checkout] upsert_customer_from_order threw:', err?.message || err);
     }
 
     return NextResponse.json({
@@ -283,6 +334,10 @@ export async function POST(req: Request) {
         id: order.id,
         order_number: order.order_number,
         total: order.total,
+        subtotal,
+        discount_total: discount,
+        shipping_total: shippingCost,
+        coupon_code: couponApplied,
         tracking_number: trackingNumber,
         payment_status: order.payment_status,
         status: order.status,

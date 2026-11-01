@@ -56,7 +56,7 @@ export default function ProductSalesStats({ isOpen, onClose }: { isOpen: boolean
             let ordersQuery = supabase
                 .from('orders')
                 .select('id')
-                .eq('payment_status', 'paid')
+                .in('payment_status', ['paid', 'partially_paid'])
                 .neq('status', 'cancelled');
 
             if (startDate) {
@@ -72,27 +72,19 @@ export default function ProductSalesStats({ isOpen, onClose }: { isOpen: boolean
                 return;
             }
 
-            const { data, error } = await supabase
-                .from('order_items')
-                .select(`
-          quantity,
-          product_name,
-          product_id,
-          variant_name,
-          total_price,
-          order_id,
-          orders (
-            id,
-            created_at,
-            status,
-            payment_status
-          )
-        `)
-                .in('order_id', orderIds);
+            // Load line items in chunks of 100 ids so the query string stays a sane size.
+            const data: any[] = [];
+            for (let i = 0; i < orderIds.length; i += 100) {
+                const chunk = orderIds.slice(i, i + 100);
+                const { data: chunkItems, error } = await supabase
+                    .from('order_items')
+                    .select('quantity, product_name, product_id, variant_name, total_price, order_id')
+                    .in('order_id', chunk);
+                if (error) throw error;
+                if (chunkItems) data.push(...chunkItems);
+            }
 
-            if (error) throw error;
-
-            if (data) {
+            {
                 const map = new Map<string, SalesStat>();
 
                 data.forEach((item: any) => {
@@ -121,7 +113,7 @@ export default function ProductSalesStats({ isOpen, onClose }: { isOpen: boolean
                     existing.revenue += (item.total_price || 0);
                     entry.variants.set(variantName, existing);
 
-                    const orderId = item.orders?.id;
+                    const orderId = item.order_id;
                     if (orderId && !entry._orderIds.has(orderId)) {
                         entry.ordersCount++;
                         entry._orderIds.add(orderId);

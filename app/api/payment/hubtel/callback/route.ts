@@ -9,7 +9,14 @@ import {
   updatePaymentAttemptStatus,
 } from '@/lib/payments/audit';
 import { applyOrderPayment } from '@/lib/payments/apply-payment';
-import { mapHubtelStatus } from '@/lib/payments/hubtel';
+import { mapHubtelStatus, verifyHubtelTransaction } from '@/lib/payments/hubtel';
+import { timingSafeEqual } from 'crypto';
+
+function secretMatches(provided: unknown, expected: string): boolean {
+  const a = Buffer.from(String(provided ?? ''));
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 import { query } from '@/lib/db/pool';
 import { isPlainPostgres } from '@/lib/db/mode';
 
@@ -53,7 +60,7 @@ export async function POST(req: Request) {
         body.secret ||
         body.Secret ||
         '';
-      if (provided !== expectedSecret) {
+      if (!secretMatches(provided, expectedSecret)) {
         signatureStatus = 'invalid';
         await recordCallbackEvent({
           gateway: 'hubtel',
@@ -160,6 +167,20 @@ export async function POST(req: Request) {
           expectedAmount = Number(rows[0].amount_expected);
         }
       } catch { /* ignore */ }
+    }
+
+    // Without a shared secret the POST body proves nothing: confirm with Hubtel
+    // (status + amount) before touching the order.
+    if (signatureStatus !== 'valid') {
+      const confirmed = await verifyHubtelTransaction(String(rawRef));
+      if (!confirmed.success || confirmed.status !== 'successful') {
+        await markCallbackProcessed(eventId, 'failed', 'unsigned callback not confirmed by Hubtel');
+        return NextResponse.json({ success: false, message: 'Payment not confirmed' }, { status: 403 });
+      }
+      if (confirmed.amount != null && Math.abs(confirmed.amount - callbackAmount) > 0.01) {
+        await markCallbackProcessed(eventId, 'failed', 'unsigned callback amount differs from Hubtel');
+        return NextResponse.json({ success: false, message: 'Amount mismatch' }, { status: 400 });
+      }
     }
 
     if (Math.abs(callbackAmount - expectedAmount) > 0.01) {

@@ -71,7 +71,7 @@ export default function ProductCard({
   price,
   originalPrice,
   image,
-  rating = 5,
+  rating = 0,
   reviewCount = 0,
   badge,
   inStock = true,
@@ -93,6 +93,8 @@ export default function ProductCard({
   const MAX_SWATCHES = 5;
   const formatPrice = (val: number) => `GH\u20B5${val.toFixed(2)}`;
   const ratingDisplay = Number(rating || 0).toFixed(1);
+  const hasReviews = Number(reviewCount) > 0 && Number(rating) > 0;
+  const safeImage = image || '/images/placeholder-product.svg';
 
   if (variant === 'showcase') {
     return (
@@ -100,7 +102,7 @@ export default function ProductCard({
         <div className="relative z-0 aspect-[5/6] rounded-xl overflow-hidden bg-[#F3F1EC] mb-2">
           <Link href={`/product/${slug}`} className="absolute inset-0 block">
             <LazyImage
-              src={image}
+              src={safeImage}
               alt={name}
               className="w-full h-full object-cover object-center transition-transform duration-700 ease-out group-hover:scale-105"
             />
@@ -163,10 +165,12 @@ export default function ProductCard({
           <span className="text-[12px] text-stone-400 font-medium truncate">
             {category || 'AbbyGlow Essentials'}
           </span>
-          <span className="inline-flex items-center gap-1 text-[12px] text-stone-600 shrink-0">
-            <i className="ri-star-fill text-amber-400 text-[13px]" />
-            {ratingDisplay}
-          </span>
+          {hasReviews && (
+            <span className="inline-flex items-center gap-1 text-[12px] text-stone-600 shrink-0">
+              <i className="ri-star-fill text-amber-400 text-[13px]" />
+              {ratingDisplay}
+            </span>
+          )}
         </div>
 
         <Link href={`/product/${slug}`}>
@@ -191,7 +195,7 @@ export default function ProductCard({
     <div className="group relative z-0 flex flex-col h-full bg-transparent transition-all duration-300 isolate">
       <Link href={`/product/${slug}`} className={`relative z-0 block aspect-[4/5] overflow-hidden bg-[#F4F4F4] ${compact ? 'rounded-lg sm:rounded-2xl mb-2 sm:mb-4' : 'rounded-2xl mb-4'}`}>
         <LazyImage
-          src={image}
+          src={safeImage}
           alt={name}
           className="w-full h-full object-cover object-center transition-transform duration-700 ease-out group-hover:scale-105"
         />

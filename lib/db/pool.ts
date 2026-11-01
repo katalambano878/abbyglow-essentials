@@ -4,6 +4,7 @@
 // to Postgres through the supabase-compat client, which uses this pool.
 
 import { Pool, types } from "pg";
+import { scheduleBackgroundJobs } from "@/lib/jobs";
 
 // --- PostgREST-faithful type parsing ---------------------------------------
 // Supabase (PostgREST) serializes these as JSON strings/numbers; node-postgres
@@ -76,6 +77,9 @@ export function getPool(): Pool {
   const pool = createPool();
   // Survive Next.js hot reload in development (prevents orphaned pools / too many clients).
   globalForPg.__abbyglowPgPool = pool;
+  // The pool only ever exists in the Node runtime, so this is a safe place to
+  // start timers that need the database.
+  scheduleBackgroundJobs();
   return pool;
 }
 

@@ -36,7 +36,7 @@ export async function initiateHubtelPayment(input: {
 
   let orderQuery = supabaseAdmin
     .from('orders')
-    .select('id, order_number, total, email, phone, payment_status, payment_plan, amount_due_now, amount_paid, balance_due, shipping_address, metadata');
+    .select('id, order_number, total, email, phone, status, payment_status, payment_plan, amount_due_now, amount_paid, balance_due, shipping_address, metadata');
 
   if (UUID_REGEX.test(input.orderId)) {
     orderQuery = orderQuery.eq('id', input.orderId);
@@ -55,6 +55,11 @@ export async function initiateHubtelPayment(input: {
   }
 
   const orderRef = order.order_number || input.orderId;
+  // The pay page only knows a masked email (ab***@x); never forward that to the gateway.
+  const customerEmail =
+    input.customerEmail && !input.customerEmail.includes('*') && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.customerEmail)
+      ? input.customerEmail
+      : order.email;
   const clientReference = `${orderRef}-H${Date.now()}`;
   const plan = (order.payment_plan || 'full') as PaymentPlan;
   const purpose = purposeForPlan(plan, charge.kind === 'balance');
@@ -75,8 +80,14 @@ export async function initiateHubtelPayment(input: {
     merchantAccountNumber: process.env.HUBTEL_MERCHANT_ACCOUNT_NUMBER,
     clientReference,
     payeeName,
-    payeeEmail: input.customerEmail || order.email || '',
-    payeeMobileNumber: payeePhone.startsWith('233') ? payeePhone : payeePhone,
+    payeeEmail: customerEmail || '',
+    payeeMobileNumber: payeePhone.startsWith('233')
+      ? payeePhone
+      : payeePhone.startsWith('0')
+        ? `233${payeePhone.slice(1)}`
+        : payeePhone.length === 9
+          ? `233${payeePhone}`
+          : payeePhone,
   };
 
   const initiateUrl =

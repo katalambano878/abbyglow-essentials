@@ -326,14 +326,14 @@ export async function sendOrderConfirmation(order: any) {
         }
         return 'Customer';
     };
-    const name = getName();
+    const name = escapeHtml(String(getName()));
 
     // Prefer top-level phone, then shipping address phone
     const phone = orderPhone || shipping_address?.phone;
 
     // Get tracking number from metadata
-    const trackingNumber = metadata?.tracking_number || '';
-    const trackingUrl = `${baseUrl}/order-tracking?order=${order_number || id}`;
+    const trackingNumber = escapeHtml(String(metadata?.tracking_number || ''));
+    const trackingUrl = `${baseUrl}/order-tracking?order=${encodeURIComponent(order_number || id)}`;
 
     console.log(`[Notification] Preparing for Order #${order_number} | Phone: ${phone ? 'Present' : 'Missing'} | Tracking: ${trackingNumber || 'None'}`);
 
@@ -350,7 +350,7 @@ export async function sendOrderConfirmation(order: any) {
             for (const item of items) {
                 const preorder = item.metadata?.preorder_shipping;
                 if (preorder) {
-                    shippingNotes.push(`${item.product_name}: ${preorder}`);
+                    shippingNotes.push(`${escapeHtml(String(item.product_name || ''))}: ${escapeHtml(String(preorder))}`);
                 }
             }
         }
@@ -361,7 +361,7 @@ export async function sendOrderConfirmation(order: any) {
     const itemsCount = orderItems.reduce((sum, it) => sum + Number(it.quantity || 0), 0);
 
     const shippingNotesSms = shippingNotes.length > 0
-        ? ` Note: ${shippingNotes.join('; ')}.`
+        ? ` Note: ${shippingNotes.map((n) => n.replace(/&#039;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')).join('; ')}.`
         : '';
 
     // 1. Email to Customer
@@ -406,9 +406,9 @@ ${emailButton('Track Your Order', trackingUrl)}
 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f9fafb;border-radius:12px;overflow:hidden;margin:16px 0;">
   ${emailInfoRow('Order', `#${order_number || id}`)}
-  ${emailInfoRow('Customer', escapeHtml(name))}
-  ${emailInfoRow('Email', `<a href="mailto:${email}" style="color:${BRAND.color};">${email}</a>`)}
-  ${phone ? emailInfoRow('Phone', `<a href="tel:${phone}" style="color:${BRAND.color};">${escapeHtml(phone)}</a>`) : ''}
+  ${emailInfoRow('Customer', name)}
+  ${emailInfoRow('Email', `<a href="mailto:${escapeHtml(String(email || ''))}" style="color:${BRAND.color};">${escapeHtml(String(email || ''))}</a>`)}
+  ${phone ? emailInfoRow('Phone', `<a href="tel:${escapeHtml(String(phone))}" style="color:${BRAND.color};">${escapeHtml(String(phone))}</a>`) : ''}
   ${emailInfoRow('Fulfilment', order.shipping_method === 'pickup' ? 'Store Pickup' : 'Delivery')}
   ${emailInfoRow('Payment', `${escapeHtml(order.payment_method || 'N/A')} — ${escapeHtml(order.payment_status || 'pending')}`)}
   ${emailInfoRow('Plan', isDepositPlan(order.payment_plan) ? depositPlanLabel() : 'Full payment')}
@@ -426,7 +426,7 @@ ${emailAddressBlock(order)}
 ${emailShippingNotes(shippingNotes)}
 
 ${emailButton('View Order in Admin', `${baseUrl}/admin/orders/${id}`)}
-`, `New order #${order_number} from ${name} — GH₵${Number(total).toFixed(2)}`);
+`, `New order #${escapeHtml(String(order_number || ''))} from ${name} — GH₵${Number(total).toFixed(2)}`);
 
     await sendEmail({
         to: ADMIN_EMAIL,
@@ -436,9 +436,10 @@ ${emailButton('View Order in Admin', `${baseUrl}/admin/orders/${id}`)}
 
     // 3. SMS to Customer (if phone exists)
     if (phone) {
+        const smsName = String(getName());
         const smsMessage = trackingNumber
-            ? `Hi ${name}, your order #${order_number || id} is confirmed! Tracking: ${trackingNumber}. Track here: ${trackingUrl}${shippingNotesSms}`
-            : `Hi ${name}, your order #${order_number || id} at our store is confirmed! Track here: ${trackingUrl}${shippingNotesSms}`;
+            ? `Hi ${smsName}, your order #${order_number || id} is confirmed! Tracking: ${metadata?.tracking_number}. Track here: ${trackingUrl}${shippingNotesSms}`
+            : `Hi ${smsName}, your order #${order_number || id} at our store is confirmed! Track here: ${trackingUrl}${shippingNotesSms}`;
 
         await sendSMS({
             to: phone,
@@ -467,10 +468,14 @@ export async function sendOrderStatusUpdate(order: any, newStatus: string) {
         }
         return 'Customer';
     };
-    const name = getName();
+    const rawName = String(getName());
+    const name = escapeHtml(rawName);
     const phone = orderPhone || shipping_address?.phone;
-    const trackingNumber = metadata?.tracking_number || '';
-    const trackingUrl = `${baseUrl}/order-tracking?order=${order_number || id}`;
+    const rawTracking = String(metadata?.tracking_number || '');
+    const trackingNumber = escapeHtml(rawTracking);
+    const trackingUrl = `${baseUrl}/order-tracking?order=${encodeURIComponent(order_number || id)}`;
+    const statusKey = String(newStatus || '').toLowerCase();
+    newStatus = escapeHtml(statusKey.replace(/_/g, ' '));
 
     console.log(`[Notification] Status update for Order #${order_number} to ${newStatus} | Tracking: ${trackingNumber}`);
 
@@ -478,20 +483,20 @@ export async function sendOrderStatusUpdate(order: any, newStatus: string) {
     let message = `Your order #${order_number || id} status has been updated to ${newStatus}.`;
     let smsMessage = message;
 
-    if (newStatus === 'shipped') {
+    if (statusKey === 'shipped') {
         message = `Good news! Your order #${order_number || id} has been packaged and is ready.`;
-        smsMessage = trackingNumber
-            ? `Good news ${name}! Order #${order_number || id} has been packaged. Tracking: ${trackingNumber}. Track: ${trackingUrl}`
-            : `Good news ${name}! Order #${order_number || id} has been packaged. Track: ${trackingUrl}`;
-    } else if (newStatus === 'delivered') {
+        smsMessage = rawTracking
+            ? `Good news ${rawName}! Order #${order_number || id} has been packaged. Tracking: ${rawTracking}. Track: ${trackingUrl}`
+            : `Good news ${rawName}! Order #${order_number || id} has been packaged. Track: ${trackingUrl}`;
+    } else if (statusKey === 'delivered') {
         message = `Your order #${order_number || id} has been delivered. Enjoy!`;
-        smsMessage = `Hi ${name}, your order #${order_number || id} has been delivered. Enjoy your purchase!`;
-    } else if (newStatus === 'processing') {
-        smsMessage = trackingNumber
-            ? `Hi ${name}, your order #${order_number || id} is being processed. Tracking: ${trackingNumber}. Track: ${trackingUrl}`
-            : `Hi ${name}, your order #${order_number || id} is being processed. Track: ${trackingUrl}`;
+        smsMessage = `Hi ${rawName}, your order #${order_number || id} has been delivered. Enjoy your purchase!`;
+    } else if (statusKey === 'processing') {
+        smsMessage = rawTracking
+            ? `Hi ${rawName}, your order #${order_number || id} is being processed. Tracking: ${rawTracking}. Track: ${trackingUrl}`
+            : `Hi ${rawName}, your order #${order_number || id} is being processed. Track: ${trackingUrl}`;
     } else {
-        smsMessage = `Hi ${name}, order #${order_number || id} status: ${newStatus}. Track: ${trackingUrl}`;
+        smsMessage = `Hi ${rawName}, order #${order_number || id} status: ${statusKey.replace(/_/g, ' ')}. Track: ${trackingUrl}`;
     }
 
     // Status icons/colors
@@ -501,7 +506,7 @@ export async function sendOrderStatusUpdate(order: any, newStatus: string) {
         delivered: { icon: '&#127881;', color: '#16a34a', bg: '#f0fdf4' },
         cancelled: { icon: '&#10060;', color: '#dc2626', bg: '#fef2f2' },
     };
-    const sc = statusConfig[newStatus] || { icon: '&#128276;', color: '#6b7280', bg: '#f9fafb' };
+    const sc = statusConfig[statusKey] || { icon: '&#128276;', color: '#6b7280', bg: '#f9fafb' };
 
     await sendEmail({
         to: email,
@@ -522,7 +527,7 @@ export async function sendOrderStatusUpdate(order: any, newStatus: string) {
 <p style="color:#374151;font-size:14px;line-height:1.6;margin:16px 0;">${message}</p>
 
 ${emailButton('Track Your Order', trackingUrl)}
-`, `Your order #${order_number} is now ${newStatus}`)
+`, `Your order #${escapeHtml(String(order_number || ''))} is now ${newStatus}`)
     });
 
     // SMS
@@ -535,7 +540,8 @@ ${emailButton('Track Your Order', trackingUrl)}
 }
 
 export async function sendWelcomeMessage(user: { email: string, firstName: string, phone?: string }) {
-    const { email, firstName, phone } = user;
+    const { email, phone } = user;
+    const firstName = escapeHtml(String(user.firstName || 'there'));
 
     // Email
     await sendEmail({
@@ -606,8 +612,14 @@ export async function sendPaymentLink(order: any) {
         }
         return 'Customer';
     };
-    const name = getName();
+    const name = escapeHtml(String(getName()));
     const phone = orderPhone || shipping_address?.phone;
+    // Deposit orders owe amount_due_now first, then the balance; never the full total twice.
+    const paid = Number(order.amount_paid || 0);
+    const amountDue =
+        paid > 0
+            ? Number(order.balance_due ?? Math.max(0, Number(total || 0) - paid))
+            : Number(order.amount_due_now ?? total ?? 0);
 
     console.log(`[Notification] Sending payment link for Order #${order_number} | Phone: ${phone ? 'Present' : 'Missing'}`);
 
@@ -624,12 +636,13 @@ export async function sendPaymentLink(order: any) {
 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f9fafb;border-radius:12px;overflow:hidden;margin:20px 0;">
   ${emailInfoRow('Order Number', `#${order_number}`)}
-  ${emailInfoRow('Amount Due', `<span style="color:${BRAND.color};font-size:18px;font-weight:700;">GH₵${Number(total).toFixed(2)}</span>`)}
+  ${emailInfoRow('Amount Due', `<span style="color:${BRAND.color};font-size:18px;font-weight:700;">GH₵${amountDue.toFixed(2)}</span>`)}
+  ${Number(total || 0) > amountDue + 0.01 ? emailInfoRow('Order Total', `GH₵${Number(total).toFixed(2)}`) : ''}
 </table>
 
 <p style="color:#374151;font-size:14px;line-height:1.6;margin:16px 0;">Click the button below to securely complete your payment. This link will remain active until your order is completed or cancelled.</p>
 
-${emailButton('Pay Now — GH₵' + Number(total).toFixed(2), paymentUrl, '#d97706')}
+${emailButton('Pay Now — GH₵' + amountDue.toFixed(2), paymentUrl, '#d97706')}
 
 <p style="color:#9ca3af;font-size:12px;text-align:center;margin:0;">Or copy this link: <a href="${paymentUrl}" style="color:${BRAND.color};">${paymentUrl}</a></p>
 `, `Complete payment for order #${order_number}`)
@@ -637,7 +650,7 @@ ${emailButton('Pay Now — GH₵' + Number(total).toFixed(2), paymentUrl, '#d977
 
     // SMS with payment link
     if (phone) {
-        const smsMessage = `Hi ${name}, complete your order #${order_number} (GH₵${Number(total).toFixed(2)}) here: ${paymentUrl}`;
+        const smsMessage = `Hi ${getName()}, complete your order #${order_number} (GH₵${amountDue.toFixed(2)}) here: ${paymentUrl}`;
 
         await sendSMS({
             to: phone,

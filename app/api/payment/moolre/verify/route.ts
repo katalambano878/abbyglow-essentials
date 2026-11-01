@@ -30,7 +30,7 @@ export async function POST(req: Request) {
             return NextResponse.json({ success: false, message: 'Missing or invalid orderNumber' }, { status: 400 });
         }
 
-        if (!/^ORD-\d+-\d+$/.test(orderNumber)) {
+        if (!/^ORD-[A-Z0-9-]{4,40}$/i.test(orderNumber)) {
             return NextResponse.json({ success: false, message: 'Invalid order number format' }, { status: 400 });
         }
 

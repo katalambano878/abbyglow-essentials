@@ -4,9 +4,14 @@ interface FraudDetectionAlertProps {
   riskLevel: 'low' | 'medium' | 'high';
   reasons: string[];
   orderId: string;
+  /** Puts the order on hold (status pending + metadata.on_hold). Omit when already on hold. */
+  onHold?: () => void;
+  /** Opens tel:/mailto: for the customer. */
+  onContact?: () => void;
+  busy?: boolean;
 }
 
-export default function FraudDetectionAlert({ riskLevel, reasons, orderId }: FraudDetectionAlertProps) {
+export default function FraudDetectionAlert({ riskLevel, reasons, orderId, onHold, onContact, busy }: FraudDetectionAlertProps) {
   const getRiskColor = () => {
     switch (riskLevel) {
       case 'low': return 'bg-green-50 border-green-200 text-green-800';
@@ -42,7 +47,7 @@ export default function FraudDetectionAlert({ riskLevel, reasons, orderId }: Fra
               Order #{orderId}
             </span>
           </div>
-          
+
           {reasons.length > 0 && (
             <div className="space-y-1 text-sm">
               <p className="font-medium">Risk Indicators:</p>
@@ -57,18 +62,31 @@ export default function FraudDetectionAlert({ riskLevel, reasons, orderId }: Fra
             </div>
           )}
 
-          {riskLevel === 'high' && (
+          {riskLevel === 'high' && (onHold || onContact) && (
             <div className="mt-3 pt-3 border-t border-red-300">
               <p className="text-sm font-medium mb-2">Recommended Actions:</p>
               <div className="flex gap-2">
-                <button className="px-3 py-1.5 bg-red-600 text-white rounded text-sm font-medium hover:bg-red-700 transition-colors whitespace-nowrap">
-                  <i className="ri-pause-circle-line mr-1"></i>
-                  Hold Order
-                </button>
-                <button className="px-3 py-1.5 bg-white text-red-800 rounded text-sm font-medium hover:bg-red-100 transition-colors whitespace-nowrap">
-                  <i className="ri-customer-service-line mr-1"></i>
-                  Contact Customer
-                </button>
+                {onHold && (
+                  <button
+                    type="button"
+                    onClick={onHold}
+                    disabled={busy}
+                    className="px-3 py-1.5 bg-red-600 text-white rounded text-sm font-medium hover:bg-red-700 transition-colors whitespace-nowrap disabled:opacity-50 cursor-pointer"
+                  >
+                    <i className="ri-pause-circle-line mr-1"></i>
+                    Hold Order
+                  </button>
+                )}
+                {onContact && (
+                  <button
+                    type="button"
+                    onClick={onContact}
+                    className="px-3 py-1.5 bg-white text-red-800 rounded text-sm font-medium hover:bg-red-100 transition-colors whitespace-nowrap cursor-pointer"
+                  >
+                    <i className="ri-customer-service-line mr-1"></i>
+                    Contact Customer
+                  </button>
+                )}
               </div>
             </div>
           )}

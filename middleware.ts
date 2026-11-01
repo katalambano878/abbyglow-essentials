@@ -69,7 +69,7 @@ export async function middleware(request: NextRequest) {
   const response = NextResponse.next();
 
   response.headers.set('X-Content-Type-Options', 'nosniff');
-  response.headers.set('X-Frame-Options', 'DENY');
+  response.headers.set('X-Frame-Options', 'SAMEORIGIN');
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
 
   if (pathname.startsWith('/admin')) {
@@ -101,7 +101,13 @@ export async function middleware(request: NextRequest) {
       return response;
     }
 
-    if (supabaseServiceKey) {
+    if (!supabaseServiceKey) {
+      const loginUrl = new URL('/admin/login', request.url);
+      loginUrl.searchParams.set('error', 'unauthorized');
+      return NextResponse.redirect(loginUrl);
+    }
+
+    {
       try {
         const supabase = createClient(supabaseUrl, supabaseServiceKey, {
           auth: { autoRefreshToken: false, persistSession: false },
@@ -135,15 +141,23 @@ export async function middleware(request: NextRequest) {
         response.headers.set('x-user-role', profile.role);
       } catch (err) {
         console.error('[Middleware] Auth check error:', err);
+        const loginUrl = new URL('/admin/login', request.url);
+        loginUrl.searchParams.set('error', 'session_expired');
+        return NextResponse.redirect(loginUrl);
       }
     }
   }
 
+  const cacheableCatalog =
+    pathname === '/api/storefront/products' ||
+    pathname === '/api/storefront/categories' ||
+    pathname.startsWith('/storage/v1/object/public/');
   if (
-    pathname.startsWith('/api/') ||
-    pathname.startsWith('/rest/') ||
-    pathname.startsWith('/auth/v1') ||
-    pathname.startsWith('/storage/')
+    !cacheableCatalog &&
+    (pathname.startsWith('/api/') ||
+      pathname.startsWith('/rest/') ||
+      pathname.startsWith('/auth/v1') ||
+      pathname.startsWith('/storage/'))
   ) {
     response.headers.set('Cache-Control', 'no-store');
   }

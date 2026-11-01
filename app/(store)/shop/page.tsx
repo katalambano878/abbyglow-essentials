@@ -44,7 +44,7 @@ function ShopContent() {
     else setSelectedCategory('all');
     if (sortParam) setSortBy(sortParam);
     setPage(1);
-  }, [categoryParam, sortParam]);
+  }, [categoryParam, sortParam, searchParam]);
 
   // Fetch Categories from cached API
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -183,11 +183,11 @@ function ShopContent() {
               name: p.name,
               price: p.price,
               originalPrice: displayCompareAtPrice(p.compare_at_price, p.price),
-              image: p.product_images?.[0]?.url || 'https://via.placeholder.com/800x800?text=No+Image',
-              rating: p.rating_avg || 0,
-              reviewCount: 0, // Need to implement reviews relation
+              image: p.product_images?.[0]?.url || '/images/placeholder-product.svg',
+              rating: Number(p.rating_avg) || 0,
+              reviewCount: Number(p.review_count) || 0,
               badge: undefined,
-              inStock: effectiveStock > 0,
+              inStock: effectiveStock > 0 || isPreorderProduct(p.metadata),
               maxStock: effectiveStock || 50,
               moq: p.moq || 1,
               category: p.categories?.name,

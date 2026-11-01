@@ -4,11 +4,16 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 
+type ReviewStatus = 'pending' | 'approved' | 'rejected';
+
 export default function AdminReviewsPage() {
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | ReviewStatus>('all');
   const [selectedReviews, setSelectedReviews] = useState<string[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sortBy, setSortBy] = useState<'date' | 'rating' | 'helpful'>('date');
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [updating, setUpdating] = useState(false);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -28,9 +33,8 @@ export default function AdminReviewsPage() {
         .order('created_at', { ascending: false });
 
       if (error) {
-        // Graceful fallback if table doesn't exist or permissions fail
         console.warn('Error fetching reviews:', error);
-        // setReviews([]); // Keep empty
+        setNotice({ type: 'error', text: `Could not load reviews: ${error.message}` });
       } else if (data) {
         const formatted = data.map((r: any) => ({
           id: r.id,
@@ -41,14 +45,16 @@ export default function AdminReviewsPage() {
           },
           product: {
             name: r.products?.name || 'Unknown Product',
-            image: r.products?.product_images?.[0]?.url || 'https://via.placeholder.com/150'
+            image: r.products?.product_images?.[0]?.url || '/images/placeholder-product.svg'
           },
-          rating: r.rating,
+          rating: Number(r.rating) || 0,
           title: r.title,
           comment: r.content,
           date: new Date(r.created_at).toLocaleDateString(),
-          status: r.status || 'Pending',
-          helpful: r.helpful || 0
+          createdAt: new Date(r.created_at).getTime(),
+          status: (String(r.status || 'pending').toLowerCase()) as ReviewStatus,
+          verified: Boolean(r.verified_purchase),
+          helpful: Number(r.helpful_votes) || 0
         }));
         setReviews(formatted);
       }
@@ -70,22 +76,27 @@ export default function AdminReviewsPage() {
       .toUpperCase() || '??';
   };
 
-  const filteredReviews = reviews.filter(r =>
-    statusFilter === 'all' || r.status.toLowerCase() === statusFilter
-  );
+  const filteredReviews = reviews
+    .filter(r => statusFilter === 'all' || r.status === statusFilter)
+    .sort((a, b) => {
+      if (sortBy === 'rating') return b.rating - a.rating || b.createdAt - a.createdAt;
+      if (sortBy === 'helpful') return b.helpful - a.helpful || b.createdAt - a.createdAt;
+      return b.createdAt - a.createdAt;
+    });
 
   const stats = {
     total: reviews.length,
-    pending: reviews.filter(r => r.status.toLowerCase() === 'pending').length,
-    approved: reviews.filter(r => r.status.toLowerCase() === 'approved').length,
-    rejected: reviews.filter(r => r.status.toLowerCase() === 'rejected').length
+    pending: reviews.filter(r => r.status === 'pending').length,
+    approved: reviews.filter(r => r.status === 'approved').length,
+    rejected: reviews.filter(r => r.status === 'rejected').length
   };
 
-  const statusColors: any = {
-    'Pending': 'bg-amber-100 text-amber-700',
-    'Approved': 'bg-brand-soft text-brand',
-    'Rejected': 'bg-red-100 text-red-700'
+  const statusColors: Record<ReviewStatus, string> = {
+    pending: 'bg-amber-100 text-amber-700',
+    approved: 'bg-brand-soft text-brand',
+    rejected: 'bg-red-100 text-red-700'
   };
+  const statusLabel = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
   const handleSelectAll = () => {
     if (selectedReviews.length === filteredReviews.length) {
@@ -103,27 +114,30 @@ export default function AdminReviewsPage() {
     }
   };
 
-  const handleBulkAction = async (action: string) => {
-    if (selectedReviews.length === 0) return;
+  const setReviewStatus = async (ids: string[], newStatus: ReviewStatus) => {
+    if (ids.length === 0) return;
+    setUpdating(true);
+    setNotice(null);
     try {
-      let newStatus = '';
-      if (action === 'Approve') newStatus = 'Approved';
-      if (action === 'Reject') newStatus = 'Rejected';
+      const { error } = await supabase
+        .from('reviews')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .in('id', ids);
 
-      if (newStatus) {
-        const { error } = await supabase
-          .from('reviews')
-          .update({ status: newStatus })
-          .in('id', selectedReviews);
-
-        if (error) throw error;
-        fetchReviews();
-        setSelectedReviews([]);
-      }
-    } catch (err) {
+      if (error) throw error;
+      await fetchReviews();
+      setSelectedReviews([]);
+      setNotice({ type: 'success', text: `${ids.length} review${ids.length === 1 ? '' : 's'} marked ${newStatus}.` });
+    } catch (err: any) {
       console.error('Error updating reviews', err);
-      alert('Failed to update reviews. Functionality might be limited.');
+      setNotice({ type: 'error', text: `Failed to update reviews: ${err?.message || 'unknown error'}` });
+    } finally {
+      setUpdating(false);
     }
+  };
+
+  const handleBulkAction = (action: 'Approve' | 'Reject') => {
+    setReviewStatus(selectedReviews, action === 'Approve' ? 'approved' : 'rejected');
   };
 
   const renderStars = (rating: number) => {
@@ -147,6 +161,15 @@ export default function AdminReviewsPage() {
           <p className="text-gray-600 mt-1">Moderate and manage customer reviews</p>
         </div>
       </div>
+
+      {notice && (
+        <div className={`rounded-lg p-4 text-sm flex items-start justify-between gap-4 border ${notice.type === 'success' ? 'bg-brand-soft text-brand border-brand/30' : 'bg-red-50 text-red-700 border-red-200'}`}>
+          <span>{notice.text}</span>
+          <button onClick={() => setNotice(null)} className="shrink-0 cursor-pointer" aria-label="Dismiss">
+            <i className="ri-close-line text-lg"></i>
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <button
@@ -189,10 +212,14 @@ export default function AdminReviewsPage() {
             <h2 className="text-lg font-bold text-gray-900 text-transform capitalize">
               {statusFilter === 'all' ? 'All Reviews' : `${statusFilter} Reviews`}
             </h2>
-            <select className="px-4 py-2 pr-8 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-brand focus:border-brand font-medium cursor-pointer">
-              <option>Sort by Date</option>
-              <option>Sort by Rating</option>
-              <option>Sort by Helpful</option>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              className="px-4 py-2 pr-8 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-brand focus:border-brand font-medium cursor-pointer"
+            >
+              <option value="date">Sort by Date</option>
+              <option value="rating">Sort by Rating</option>
+              <option value="helpful">Sort by Helpful</option>
             </select>
           </div>
         </div>
@@ -205,14 +232,16 @@ export default function AdminReviewsPage() {
             <div className="flex items-center space-x-2">
               <button
                 onClick={() => handleBulkAction('Approve')}
-                className="px-4 py-2 bg-brand hover:bg-brand-dark text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer"
+                disabled={updating}
+                className="px-4 py-2 bg-brand hover:bg-brand-dark text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50"
               >
                 <i className="ri-check-line mr-2"></i>
                 Approve
               </button>
               <button
                 onClick={() => handleBulkAction('Reject')}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer"
+                disabled={updating}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50"
               >
                 <i className="ri-close-line mr-2"></i>
                 Reject
@@ -237,14 +266,15 @@ export default function AdminReviewsPage() {
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 w-1/4">Customer</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700 w-1/3">Review</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Date</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Helpful</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Status</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="p-8 text-center text-gray-500">Loading reviews...</td></tr>
+                <tr><td colSpan={7} className="p-8 text-center text-gray-500">Loading reviews...</td></tr>
               ) : filteredReviews.length === 0 ? (
-                <tr><td colSpan={6} className="p-8 text-center text-gray-500">No reviews found in this category.</td></tr>
+                <tr><td colSpan={7} className="p-8 text-center text-gray-500">No reviews found in this category.</td></tr>
               ) : (
                 filteredReviews.map((review) => (
                   <tr key={review.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
@@ -282,13 +312,43 @@ export default function AdminReviewsPage() {
                         {renderStars(review.rating)}
                         <p className="text-sm font-bold text-gray-900">{review.title}</p>
                         <p className="text-sm text-gray-600 line-clamp-2">{review.comment}</p>
+                        {review.verified && (
+                          <span className="inline-flex items-center text-[11px] font-semibold text-brand">
+                            <i className="ri-verified-badge-line mr-1"></i>Verified purchase
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="py-4 px-4 text-sm text-gray-600 whitespace-nowrap">{review.date}</td>
+                    <td className="py-4 px-4 text-sm text-gray-700 whitespace-nowrap">
+                      <i className="ri-thumb-up-line mr-1 text-gray-400"></i>{review.helpful}
+                    </td>
                     <td className="py-4 px-4">
-                      <span className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${statusColors[review.status] || 'bg-gray-100'}`}>
-                        {review.status}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${statusColors[review.status as ReviewStatus] || 'bg-gray-100'}`}>
+                          {statusLabel(review.status)}
+                        </span>
+                        {review.status !== 'approved' && (
+                          <button
+                            onClick={() => setReviewStatus([review.id], 'approved')}
+                            disabled={updating}
+                            title="Approve"
+                            className="w-7 h-7 flex items-center justify-center text-brand hover:bg-brand-soft rounded cursor-pointer disabled:opacity-50"
+                          >
+                            <i className="ri-check-line"></i>
+                          </button>
+                        )}
+                        {review.status !== 'rejected' && (
+                          <button
+                            onClick={() => setReviewStatus([review.id], 'rejected')}
+                            disabled={updating}
+                            title="Reject"
+                            className="w-7 h-7 flex items-center justify-center text-red-600 hover:bg-red-50 rounded cursor-pointer disabled:opacity-50"
+                          >
+                            <i className="ri-close-line"></i>
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))

@@ -87,6 +87,8 @@ export default function PWAInstaller() {
     }
 
     // Register service worker with update detection in production only.
+    let updateTimer: ReturnType<typeof setInterval> | null = null;
+    let cleanupControllerChange: (() => void) | null = null;
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker
         .register('/service-worker.js', { scope: '/' })
@@ -94,7 +96,7 @@ export default function PWAInstaller() {
           console.log('[PWA] Service Worker registered with scope:', registration.scope);
 
           // Check for updates every 60 minutes
-          setInterval(() => {
+          updateTimer = setInterval(() => {
             registration.update();
           }, 60 * 60 * 1000);
 
@@ -117,19 +119,25 @@ export default function PWAInstaller() {
           console.error('[PWA] Service Worker registration failed:', error);
         });
 
-      // Handle controller change (new SW activated)
+      // Reload only when the user asked for the update (UpdatePrompt sets the
+      // flag); a new worker activating on its own must not yank the page away.
       let refreshing = false;
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (!refreshing) {
+      const onControllerChange = () => {
+        if (!refreshing && (window as any).__abbyglowSwUpdateRequested) {
           refreshing = true;
           window.location.reload();
         }
-      });
+      };
+      navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+      cleanupControllerChange = () =>
+        navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
     }
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
       window.removeEventListener('appinstalled', handleInstalled);
+      if (updateTimer) clearInterval(updateTimer);
+      if (cleanupControllerChange) cleanupControllerChange();
     };
   }, []);
 

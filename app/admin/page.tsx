@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { fetchAdminCustomers } from '@/lib/admin/customers';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const statColorClasses: Record<string, string> = {
@@ -12,41 +11,44 @@ const statColorClasses: Record<string, string> = {
   amber: 'bg-amber-100 text-amber-700',
 };
 
+const PAID_STATUSES = ['paid', 'partially_paid'];
+const LOW_STOCK_THRESHOLD = 5;
+
+type RangeKey = '7days' | '30days';
+const rangeDays: Record<RangeKey, number> = { '7days': 7, '30days': 30 };
+
 export default function AdminDashboard() {
-  const [dateRange, setDateRange] = useState('7days'); // logic not implemented for this demo, just UI
+  const [dateRange, setDateRange] = useState<RangeKey>('7days');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Real Stats
   const [stats, setStats] = useState([
     {
-      title: 'Total Revenue',
+      title: 'Revenue',
       value: 'GH₵ 0.00',
-      change: '0%', // Placeholder trend
-      trend: 'up',
+      change: 'Last 7 days',
       icon: 'ri-coins-line',
       color: 'brand'
     },
     {
       title: 'Orders',
       value: '0',
-      change: '0%',
-      trend: 'up',
+      change: 'All time',
       icon: 'ri-shopping-bag-line',
       color: 'brand'
     },
     {
-      title: 'Customers', // This is total active users for us currently
+      title: 'Customers',
       value: '0',
-      change: '0%',
-      trend: 'up',
+      change: 'Registered + guests',
       icon: 'ri-group-line',
       color: 'purple'
     },
     {
       title: 'Avg Order Value',
       value: 'GH₵ 0.00',
-      change: '0%',
-      trend: 'up',
+      change: 'Last 7 days',
       icon: 'ri-line-chart-line',
       color: 'amber'
     }
@@ -58,153 +60,199 @@ export default function AdminDashboard() {
   const [chartData, setChartData] = useState<any[]>([]);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function fetchDashboardData() {
       try {
-        // 1. Fetch ALL Orders for count & customers
-        const { data: allOrdersData, error: ordersError } = await supabase
+        setLoading(true);
+        setLoadError(null);
+
+        const days = rangeDays[dateRange];
+        const rangeStart = new Date();
+        rangeStart.setHours(0, 0, 0, 0);
+        rangeStart.setDate(rangeStart.getDate() - (days - 1));
+        const rangeStartIso = rangeStart.toISOString();
+        const rangeLabel = `Last ${days} days`;
+
+        // 1. Paid orders inside the selected range (revenue, chart, AOV, top products)
+        const { data: paidOrders, error: ordersError } = await supabase
           .from('orders')
-          .select('total, status, payment_status, created_at, email');
+          .select('id, amount_paid, total, created_at')
+          .in('payment_status', PAID_STATUSES)
+          .neq('status', 'cancelled')
+          .gte('created_at', rangeStartIso);
 
         if (ordersError) throw ordersError;
 
-        // Only count PAID orders for revenue & avg order value
-        const paidOrders = allOrdersData?.filter(o => o.payment_status === 'paid') || [];
-        const totalRevenue = paidOrders.reduce((sum, order) => sum + (order.total || 0), 0);
-        const totalOrders = allOrdersData?.length || 0;
-        const paidOrderCount = paidOrders.length;
+        const paid = paidOrders || [];
+        const totalRevenue = paid.reduce((sum, order) => sum + (Number(order.amount_paid) || 0), 0);
+        const paidOrderCount = paid.length;
         const avgOrderValue = paidOrderCount > 0 ? totalRevenue / paidOrderCount : 0;
 
-        const adminCustomers = await fetchAdminCustomers(supabase);
-        const uniqueCustomers = adminCustomers.length;
+        // 2. Counts via HEAD queries — no row payloads
+        const [{ count: totalOrders }, { count: registeredCustomers }, { count: guestCustomers }] = await Promise.all([
+          supabase.from('orders').select('id', { count: 'exact', head: true }),
+          supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'customer'),
+          supabase.from('customers').select('id', { count: 'exact', head: true }).is('user_id', null),
+        ]);
 
-
-        // Process Chart Data (Last 7 Days) - only count PAID orders as revenue
-        const last7Days = Array.from({ length: 7 }, (_, i) => {
-          const d = new Date();
-          d.setDate(d.getDate() - (6 - i));
+        // 3. Chart (zero-filled days in the range)
+        const dayKeys = Array.from({ length: days }, (_, i) => {
+          const d = new Date(rangeStart);
+          d.setDate(rangeStart.getDate() + i);
           return d.toISOString().split('T')[0];
         });
+        const chartMap: Record<string, number> = {};
+        dayKeys.forEach((key) => { chartMap[key] = 0; });
+        paid.forEach((order) => {
+          const key = new Date(order.created_at).toISOString().split('T')[0];
+          if (chartMap[key] !== undefined) chartMap[key] += Number(order.amount_paid) || 0;
+        });
+        const processedChartData = dayKeys.map((key) => ({
+          date: new Date(key).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          revenue: chartMap[key]
+        }));
 
-        const chartMap = last7Days.reduce((acc: any, date) => {
-          acc[date] = 0;
-          return acc;
-        }, {});
+        // 4. Recent paid orders
+        const { data: recentOrdersData } = await supabase
+          .from('orders')
+          .select('id, order_number, email, created_at, total, status, shipping_address')
+          .in('payment_status', PAID_STATUSES)
+          .order('created_at', { ascending: false })
+          .limit(5);
 
-        paidOrders.forEach(order => {
-          const date = new Date(order.created_at).toISOString().split('T')[0];
-          if (chartMap[date] !== undefined) {
-            chartMap[date] += (order.total || 0);
-          }
+        const formattedRecent = (recentOrdersData || []).map((o: any) => {
+          const addr = o.shipping_address || {};
+          const customerName = (addr.firstName && addr.lastName)
+            ? `${addr.firstName.trim()} ${addr.lastName.trim()}`
+            : addr.full_name || addr.firstName || (o.email ? o.email.split('@')[0] : 'Guest');
+          return {
+            id: o.id,
+            displayId: o.order_number,
+            customer: customerName,
+            email: o.email,
+            date: new Date(o.created_at).toLocaleDateString(),
+            total: Number(o.total) || 0,
+            status: o.status
+          };
         });
 
-        const processedChartData = Object.keys(chartMap).map(date => ({
-          date: new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-          revenue: chartMap[date]
-        }));
-        setChartData(processedChartData);
+        // 5. Low stock
+        const { data: lowStockData } = await supabase
+          .from('products')
+          .select('id, name, quantity')
+          .lte('quantity', LOW_STOCK_THRESHOLD)
+          .neq('status', 'archived')
+          .order('quantity', { ascending: true })
+          .limit(5);
 
+        const lowStock = (lowStockData || []).map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          stock: p.quantity,
+          status: p.quantity === 0 ? 'critical' : 'low'
+        }));
+
+        // 6. Top products: units sold from order_items of the paid orders in range
+        const salesByProduct = new Map<string, { units: number; revenue: number }>();
+        const orderIds = paid.map((o) => o.id);
+        for (let i = 0; i < orderIds.length; i += 100) {
+          const chunk = orderIds.slice(i, i + 100);
+          const { data: items } = await supabase
+            .from('order_items')
+            .select('product_id, quantity, total_price')
+            .in('order_id', chunk);
+          (items || []).forEach((item: any) => {
+            if (!item.product_id) return;
+            const entry = salesByProduct.get(item.product_id) || { units: 0, revenue: 0 };
+            entry.units += Number(item.quantity) || 0;
+            entry.revenue += Number(item.total_price) || 0;
+            salesByProduct.set(item.product_id, entry);
+          });
+        }
+
+        const rankedIds = Array.from(salesByProduct.entries())
+          .sort((a, b) => b[1].units - a[1].units)
+          .slice(0, 4)
+          .map(([id]) => id);
+
+        let productRows: any[] = [];
+        if (rankedIds.length > 0) {
+          const { data } = await supabase
+            .from('products')
+            .select('id, name, quantity, product_images(url)')
+            .in('id', rankedIds);
+          productRows = rankedIds
+            .map((id) => (data || []).find((p: any) => p.id === id))
+            .filter(Boolean);
+        }
+        if (productRows.length < 4) {
+          const { data: latest } = await supabase
+            .from('products')
+            .select('id, name, quantity, product_images(url)')
+            .order('created_at', { ascending: false })
+            .limit(8);
+          (latest || []).forEach((p: any) => {
+            if (productRows.length < 4 && !productRows.some((row) => row.id === p.id)) productRows.push(p);
+          });
+        }
+
+        const formattedTop = productRows.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          image: p.product_images?.[0]?.url || '/images/placeholder-product.svg',
+          sales: salesByProduct.get(p.id)?.units || 0,
+          revenue: salesByProduct.get(p.id)?.revenue || 0,
+          stock: p.quantity
+        }));
+
+        if (cancelled) return;
+
+        setChartData(processedChartData);
+        setRecentOrders(formattedRecent);
+        setLowStockProducts(lowStock);
+        setTopProducts(formattedTop);
         setStats([
           {
-            title: 'Total Revenue',
+            title: 'Revenue',
             value: `GH₵ ${totalRevenue.toFixed(2)}`,
-            change: '+0%', // Dynamic change requires date filtering logic which is complex
-            trend: 'up',
+            change: rangeLabel,
             icon: 'ri-coins-line',
             color: 'brand'
           },
           {
             title: 'Orders',
-            value: totalOrders.toString(),
-            change: '+0%',
-            trend: 'up',
+            value: String(totalOrders ?? 0),
+            change: `${paidOrderCount} paid · ${rangeLabel.toLowerCase()}`,
             icon: 'ri-shopping-bag-line',
             color: 'brand'
           },
           {
             title: 'Customers',
-            value: uniqueCustomers.toString(), // Proxy
-            change: '+0%',
-            trend: 'up',
+            value: String((registeredCustomers ?? 0) + (guestCustomers ?? 0)),
+            change: `${registeredCustomers ?? 0} registered · ${guestCustomers ?? 0} guests`,
             icon: 'ri-group-line',
             color: 'purple'
           },
           {
             title: 'Avg Order Value',
             value: `GH₵ ${avgOrderValue.toFixed(2)}`,
-            change: '+0%',
-            trend: 'up',
+            change: rangeLabel,
             icon: 'ri-line-chart-line',
             color: 'amber'
           }
         ]);
-
-        // 3. Fetch Recent Orders (only paid orders)
-        const { data: recentOrdersData } = await supabase
-          .from('orders')
-          .select('id, order_number, user_id, email, created_at, total, status, shipping_address')
-          .eq('payment_status', 'paid')
-          .order('created_at', { ascending: false })
-          .limit(5);
-
-        if (recentOrdersData) {
-          const formattedRecent = recentOrdersData.map((o: any) => {
-            const addr = o.shipping_address || {};
-            const customerName = (addr.firstName && addr.lastName)
-              ? `${addr.firstName.trim()} ${addr.lastName.trim()}`
-              : addr.full_name || addr.firstName || o.email.split('@')[0];
-            return {
-              id: o.id,
-              displayId: o.order_number,
-              customer: customerName,
-              email: o.email,
-              date: new Date(o.created_at).toLocaleDateString(),
-              total: o.total,
-              status: o.status,
-              items: 1
-            };
-          });
-          setRecentOrders(formattedRecent);
-        }
-
-        // 4. Fetch Low Stock Products
-        const { data: lowStockData } = await supabase
-          .from('products')
-          .select('name, quantity')
-          .lt('quantity', 10)
-          .limit(5);
-
-        if (lowStockData) {
-          setLowStockProducts(lowStockData.map((p: any) => ({
-            name: p.name,
-            stock: p.quantity,
-            status: p.quantity === 0 ? 'critical' : 'low'
-          })));
-        }
-
-        // 5. Fetch Top Products (Approximation: High Price or just Random for now, 
-        // real top selling requires aggregation on order_items which is complex for client-side)
-        // real top selling requires aggregation on order_items which is complex for client-side)
-        const { data: productData } = await supabase.from('products').select('*, product_images(url)').limit(4);
-        if (productData) {
-          setTopProducts(productData.map((p: any) => ({
-            id: p.slug, // Use slug for link
-            name: p.name,
-            image: p.product_images?.[0]?.url || 'https://via.placeholder.com/200',
-            sales: 0, // Mocked for now
-            revenue: 0, // Mocked for now
-            stock: p.quantity
-          })));
-        }
-
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error loading dashboard:', error);
+        if (!cancelled) setLoadError(error?.message || 'Failed to load dashboard data');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
     fetchDashboardData();
-  }, []);
+    return () => { cancelled = true; };
+  }, [dateRange]);
 
   const statusColors: any = {
     'pending': 'bg-amber-100 text-amber-700',
@@ -214,26 +262,7 @@ export default function AdminDashboard() {
     'cancelled': 'bg-red-100 text-red-700'
   };
 
-  const quickActions = [
-    {
-      title: 'Feature Modules',
-      description: 'Manage 40+ store features',
-      icon: 'ri-puzzle-line',
-      color: 'purple',
-      link: '/admin/modules',
-      badge: '40 Features'
-    },
-    {
-      title: 'Inventory Management',
-      description: 'Track stock & manage reorders',
-      icon: 'ri-stack-line',
-      color: 'amber',
-      link: '/admin/inventory'
-    },
-    // ... reduced list for brevity or keep all if desired
-  ];
-
-  if (loading) {
+  if (loading && chartData.length === 0) {
     return <div className="p-8 text-center text-gray-500">Loading Dashboard...</div>;
   }
 
@@ -247,6 +276,10 @@ export default function AdminDashboard() {
           </div>
         </div>
 
+        {loadError && (
+          <div className="mb-6 bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 text-sm">{loadError}</div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           {stats.map((stat) => (
             <div key={stat.title} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
@@ -254,7 +287,7 @@ export default function AdminDashboard() {
                 <div className={`w-12 h-12 flex items-center justify-center ${statColorClasses[stat.color] ?? 'bg-gray-100 text-gray-700'} rounded-lg`}>
                   <i className={`${stat.icon} text-2xl`}></i>
                 </div>
-                <span className={`text-sm font-semibold text-brand`}>
+                <span className="text-xs font-semibold text-gray-500 text-right">
                   {stat.change}
                 </span>
               </div>
@@ -272,13 +305,14 @@ export default function AdminDashboard() {
               <select
                 className="bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-lg focus:ring-brand focus:border-brand block p-2"
                 value={dateRange}
-                onChange={(e) => setDateRange(e.target.value)}
+                onChange={(e) => setDateRange(e.target.value as RangeKey)}
+                disabled={loading}
               >
                 <option value="7days">Last 7 Days</option>
                 <option value="30days">Last 30 Days</option>
               </select>
             </div>
-            <div className="h-80 w-full">
+            <div className={`h-80 w-full ${loading ? 'opacity-50' : ''}`}>
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                   <defs>
@@ -327,6 +361,15 @@ export default function AdminDashboard() {
                     <i className="ri-file-list-line"></i>
                   </span>
                   Manage Orders
+                </div>
+                <i className="ri-arrow-right-line"></i>
+              </Link>
+              <Link href="/admin/inventory" className="flex items-center justify-between p-4 bg-gray-50 hover:bg-brand-soft text-gray-700 hover:text-brand rounded-lg transition-colors group">
+                <div className="flex items-center font-medium">
+                  <span className="w-8 h-8 rounded-full bg-white flex items-center justify-center mr-3 group-hover:bg-brand-soft transition-colors shadow-sm">
+                    <i className="ri-stack-line"></i>
+                  </span>
+                  Inventory
                 </div>
                 <i className="ri-arrow-right-line"></i>
               </Link>
@@ -391,9 +434,9 @@ export default function AdminDashboard() {
                 <p className="text-gray-500">Inventory looks good!</p>
               ) : (
                 <div className="space-y-3">
-                  {lowStockProducts.map((product, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div className="flex-1">
+                  {lowStockProducts.map((product) => (
+                    <Link key={product.id} href={`/admin/products/${product.id}`} className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
+                      <div className="flex-1 min-w-0">
                         <p className="font-medium text-gray-900 text-sm truncate pr-2">{product.name}</p>
                         <p className="text-xs text-gray-600 mt-1">Stock: {product.stock} units</p>
                       </div>
@@ -401,12 +444,12 @@ export default function AdminDashboard() {
                         }`}>
                         {product.status === 'critical' ? 'Critical' : 'Low'}
                       </span>
-                    </div>
+                    </Link>
                   ))}
                 </div>
               )}
               <Link href="/admin/products?filter=low-stock" className="block text-center mt-4 text-brand hover:text-brand font-medium text-sm whitespace-nowrap cursor-pointer">
-                View All Products <i className="ri-arrow-right-line ml-1"></i>
+                View All Low Stock <i className="ri-arrow-right-line ml-1"></i>
               </Link>
             </div>
           </div>
@@ -414,28 +457,39 @@ export default function AdminDashboard() {
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 overflow-hidden">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-gray-900">Products</h2>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Top Products</h2>
+              <p className="text-sm text-gray-500">Units sold in paid orders, {rangeDays[dateRange] === 7 ? 'last 7 days' : 'last 30 days'}</p>
+            </div>
             <Link href="/admin/products" className="text-brand hover:text-brand font-medium text-sm whitespace-nowrap cursor-pointer">
               View All <i className="ri-arrow-right-line ml-1"></i>
             </Link>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {topProducts.map((product) => (
-              <div key={product.id} className="border border-gray-200 rounded-xl p-4 hover:shadow-md transition-shadow">
-                <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden mb-3">
-                  <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+          {topProducts.length === 0 ? (
+            <p className="text-gray-500 text-center py-4">No products yet.</p>
+          ) : (
+            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {topProducts.map((product) => (
+                <div key={product.id} className="border border-gray-200 rounded-xl p-4 hover:shadow-md transition-shadow">
+                  <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden mb-3">
+                    <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                  </div>
+                  <h3 className="font-semibold text-gray-900 mb-2 line-clamp-2">{product.name}</h3>
+                  <div className="flex items-center justify-between text-sm text-gray-600">
+                    <span>{product.sales} sold</span>
+                    <span>GH₵ {product.revenue.toFixed(2)}</span>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between">
+                    <span className="text-sm text-gray-600">Stock: {product.stock}</span>
+                    <Link href={`/admin/products/${product.id}`} className="text-brand hover:text-brand text-sm font-medium whitespace-nowrap cursor-pointer">
+                      Edit <i className="ri-arrow-right-line ml-1"></i>
+                    </Link>
+                  </div>
                 </div>
-                <h3 className="font-semibold text-gray-900 mb-2 line-clamp-2">{product.name}</h3>
-                <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between">
-                  <span className="text-sm text-gray-600">Stock: {product.stock}</span>
-                  <Link href={`/admin/products/${product.id}`} className="text-brand hover:text-brand text-sm font-medium whitespace-nowrap cursor-pointer">
-                    Edit <i className="ri-arrow-right-line ml-1"></i>
-                  </Link>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -50,11 +50,48 @@ export function verifyObjectToken(
   return out === 0;
 }
 
+const BUCKET_RE = /^[a-z0-9][a-z0-9-_]{0,62}$/;
+
+/** Buckets whose objects may be served without a signature. */
+const PUBLIC_BUCKETS = new Set(
+  (process.env.STORAGE_PUBLIC_BUCKETS || "products,avatars,blog,media,reviews,banners,categories")
+    .split(",")
+    .map((b) => b.trim())
+    .filter(Boolean)
+);
+
+export function isPublicBucket(bucket: string): boolean {
+  return BUCKET_RE.test(bucket) && PUBLIC_BUCKETS.has(bucket);
+}
+
+/** Decode and validate a route `path` segment array into an object key. */
+export function parseObjectPath(parts: string[]): string | null {
+  let objectPath: string;
+  try {
+    objectPath = parts.map((p) => decodeURIComponent(p)).join("/");
+  } catch {
+    return null;
+  }
+  if (
+    !objectPath ||
+    objectPath.includes("\0") ||
+    objectPath.split("/").some((seg) => seg === "" || seg === "." || seg === "..") ||
+    objectPath.endsWith(".meta.json")
+  ) {
+    return null;
+  }
+  return objectPath;
+}
+
 function safeJoin(bucket: string, objectPath: string): string {
+  if (!BUCKET_RE.test(bucket)) throw new Error("Invalid bucket");
   const clean = objectPath.replace(/^\/+/, "");
-  const full = path.normalize(path.join(STORAGE_ROOT, bucket, clean));
+  if (clean.split("/").some((seg) => seg === "." || seg === "..")) {
+    throw new Error("Path traversal blocked");
+  }
   const base = path.normalize(path.join(STORAGE_ROOT, bucket));
-  if (!full.startsWith(base)) throw new Error("Path traversal blocked");
+  const full = path.normalize(path.join(base, clean));
+  if (full !== base && !full.startsWith(base + path.sep)) throw new Error("Path traversal blocked");
   return full;
 }
 

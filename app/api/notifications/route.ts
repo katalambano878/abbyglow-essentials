@@ -4,6 +4,7 @@ import { verifyAuth } from '@/lib/auth';
 import { escapeHtml } from '@/lib/sanitize';
 import { sendOrderConfirmation, sendOrderStatusUpdate, sendWelcomeMessage, sendContactMessage, sendPaymentLink, sendEmail, sendSMS, emailLayout } from '@/lib/notifications';
 import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
+import { claimOrderConfirmation } from '@/lib/payments/audit';
 
 export async function POST(request: Request) {
     try {
@@ -51,30 +52,51 @@ export async function POST(request: Request) {
         // order_created — verify the order exists in the database
         // ============================================================
         if (type === 'order_created') {
-            // Verify the order actually exists before sending confirmation
+            // The client may only name the order. Everything that goes into the
+            // email / SMS (recipient, phone, totals, address) comes from the DB so
+            // this public endpoint cannot be used to message arbitrary people.
             if (!payload.order_number && !payload.id) {
                 return NextResponse.json({ error: 'Missing order identifier' }, { status: 400 });
             }
 
-            const orderRef = payload.order_number || payload.id;
-            const { data: order, error: orderError } = await supabaseAdmin
+            const orderRef = String(payload.order_number || payload.id || '').trim();
+            if (!/^[A-Za-z0-9-]{6,64}$/.test(orderRef)) {
+                return NextResponse.json({ error: 'Invalid order identifier' }, { status: 400 });
+            }
+            const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderRef);
+            let orderQuery = supabaseAdmin
                 .from('orders')
-                .select('id, order_number, created_at')
-                .or(`order_number.eq.${orderRef},id.eq.${orderRef}`)
-                .single();
+                .select('id, order_number, created_at, email, phone, total, subtotal, shipping_total, discount_total, payment_status, status, payment_plan, amount_due_now, amount_paid, balance_due, payment_method, shipping_method, shipping_address, metadata');
+            orderQuery = isUuid ? orderQuery.eq('id', orderRef) : orderQuery.eq('order_number', orderRef);
+            const { data: order, error: orderError } = await orderQuery.maybeSingle();
 
             if (orderError || !order) {
                 return NextResponse.json({ error: 'Order not found' }, { status: 404 });
             }
 
-            // Verify the order was created recently (within last 10 minutes)
+            // Only recent orders — callers are the checkout page right after placing
+            // the order, or the admin POS (which sends a staff token).
             const orderAge = Date.now() - new Date(order.created_at).getTime();
-            if (orderAge > 10 * 60 * 1000) {
+            const isAdminCaller = (await verifyAuth(request, { requireAdmin: true })).authenticated;
+            if (!isAdminCaller && orderAge > 10 * 60 * 1000) {
                 return NextResponse.json({ error: 'Order confirmation can only be sent for recent orders' }, { status: 400 });
             }
 
-            await sendOrderConfirmation(payload);
-            return NextResponse.json({ success: true, message: 'Order confirmation sent' });
+            const perOrder = checkRateLimit(`notification-order:${order.id}`, { maxRequests: 2, windowSeconds: 10 * 60 });
+            if (!perOrder.success) {
+                return NextResponse.json({ success: true, message: 'Already sent' });
+            }
+
+            if (order.payment_status === 'paid' || order.payment_status === 'partially_paid') {
+                const shouldSend = await claimOrderConfirmation(order.id);
+                if (shouldSend) await sendOrderConfirmation(order);
+                return NextResponse.json({ success: true, message: shouldSend ? 'Order confirmation sent' : 'Already sent' });
+            }
+
+            // Unpaid: tell the customer how to complete payment instead of
+            // confirming an order that has not been paid for.
+            await sendPaymentLink(order);
+            return NextResponse.json({ success: true, message: 'Payment instructions sent' });
         }
 
         if (type === 'order_updated') {

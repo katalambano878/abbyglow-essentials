@@ -3,6 +3,9 @@
 import Link from 'next/link';
 import { useEffect } from 'react';
 import { useCart } from '@/context/CartContext';
+import { DELIVERY_FEE } from '@/lib/shipping';
+
+const PLACEHOLDER_IMAGE = '/images/placeholder-product.svg';
 
 interface MiniCartProps {
   isOpen: boolean;
@@ -68,10 +71,10 @@ export default function MiniCart({ isOpen, onClose }: MiniCartProps) {
             <div className="flex-1 overflow-y-auto p-6 min-h-0 bg-white">
               <div className="space-y-6">
                 {cart.map((item) => (
-                  <div key={`${item.id}-${item.variant}`} className="flex space-x-4">
+                  <div key={`${item.id}-${item.variantId || item.variant || ''}`} className="flex space-x-4">
                     <div className="w-[100px] h-[100px] bg-white flex-shrink-0 border-0 rounded-md overflow-hidden">
                       <img
-                        src={item.image}
+                        src={item.image || PLACEHOLDER_IMAGE}
                         alt={item.name}
                         className="w-full h-full object-cover object-center"
                       />
@@ -137,7 +140,7 @@ export default function MiniCart({ isOpen, onClose }: MiniCartProps) {
               </div>
 
               <p className="text-[15px] text-[#6b7280] mb-6 text-center">
-                Shipping calculated at checkout
+                {DELIVERY_FEE > 0 ? 'Delivery calculated at checkout · free store pickup' : 'Free delivery or store pickup'}
               </p>
 
               <div className="space-y-3 flex flex-col items-center">

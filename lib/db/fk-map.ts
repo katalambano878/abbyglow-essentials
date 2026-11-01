@@ -25,6 +25,11 @@ export const JSONB_COLUMNS: Record<string, Set<string>> = {
 };
 
 export const FK_MAP: Record<string, FkEdge[]> = {
+  // user_id columns reference auth.users, whose rows mirror public.profiles 1:1 —
+  // embeds like `profiles:user_id(full_name)` resolve through profiles.
+  "addresses": [
+    { column: "user_id", foreignTable: "profiles", foreignColumn: "id" },
+  ],
   "cart_items": [
     { column: "product_id", foreignTable: "products", foreignColumn: "id" },
     { column: "variant_id", foreignTable: "product_variants", foreignColumn: "id" },
@@ -35,6 +40,9 @@ export const FK_MAP: Record<string, FkEdge[]> = {
   "navigation_items": [
     { column: "menu_id", foreignTable: "navigation_menus", foreignColumn: "id" },
     { column: "parent_id", foreignTable: "navigation_items", foreignColumn: "id" },
+  ],
+  "orders": [
+    { column: "user_id", foreignTable: "profiles", foreignColumn: "id" },
   ],
   "order_items": [
     { column: "order_id", foreignTable: "orders", foreignColumn: "id" },
@@ -59,12 +67,18 @@ export const FK_MAP: Record<string, FkEdge[]> = {
   ],
   "return_requests": [
     { column: "order_id", foreignTable: "orders", foreignColumn: "id" },
+    { column: "user_id", foreignTable: "profiles", foreignColumn: "id" },
   ],
   "review_images": [
     { column: "review_id", foreignTable: "reviews", foreignColumn: "id" },
   ],
   "reviews": [
     { column: "product_id", foreignTable: "products", foreignColumn: "id" },
+    { column: "user_id", foreignTable: "profiles", foreignColumn: "id" },
+  ],
+  "support_tickets": [
+    { column: "user_id", foreignTable: "profiles", foreignColumn: "id" },
+    { column: "assigned_to", foreignTable: "profiles", foreignColumn: "id" },
   ],
   "support_messages": [
     { column: "ticket_id", foreignTable: "support_tickets", foreignColumn: "id" },

@@ -42,12 +42,12 @@ export default function FAQsPage() {
     {
       category: 'shipping',
       question: 'What are your delivery times?',
-      answer: 'Standard delivery takes 2-5 business days within Ghana. Express delivery (next-day) is available for Accra and Kumasi. Orders placed before 2pm are dispatched same day. Remote areas may take 5-7 business days.'
+      answer: 'Delivery within Accra usually takes 1-3 business days and 3-7 business days elsewhere in Ghana. Pre-order items ship once stock arrives; the expected timing is shown on the product page. Store pickup is ready as soon as we confirm your order.'
     },
     {
       category: 'shipping',
       question: 'How much does shipping cost?',
-      answer: 'Standard shipping costs GHS 20. Express delivery costs GHS 40. Orders over GHS 300 qualify for FREE standard shipping. Store pickup is also available at no charge from our Accra location.'
+      answer: 'Store pickup in Accra is always free. The delivery fee, if any, is shown on the checkout page before you pay, so there are no surprises.'
     },
     {
       category: 'shipping',
@@ -57,12 +57,12 @@ export default function FAQsPage() {
     {
       category: 'shipping',
       question: 'What if nobody is home for delivery?',
-      answer: 'Our delivery partner will attempt delivery twice. If unsuccessful, the package will be held at the nearest collection point for 5 days. You\'ll receive SMS and email notifications with collection instructions.'
+      answer: 'Our rider will call the phone number on the order before delivering. If we cannot reach you, we will try again the next business day and keep you updated by SMS.'
     },
     {
       category: 'returns',
       question: 'What is your return policy?',
-      answer: 'We offer a 14-day return policy for unused items in original packaging. Simply initiate a return from your account, print the return label, and ship it back. Refunds are processed within 5-7 business days after we receive the item.'
+      answer: 'We offer a 14-day return window for unused items in their original packaging. Start a return on our Returns page with your order number and email; our team emails you the next steps within 2 business days. Refunds are processed within 5-7 business days after we receive the item.'
     },
     {
       category: 'returns',
@@ -72,12 +72,12 @@ export default function FAQsPage() {
     {
       category: 'returns',
       question: 'Who pays for return shipping?',
-      answer: 'If you\'re returning due to a defect or our error, we cover return shipping. For change-of-mind returns, customers pay return shipping costs (GHS 15 standard rate). Free shipping on returns for defective items.'
+      answer: 'If you\'re returning due to a defect or our error, we cover the cost of getting the item back to us. For change-of-mind returns, you arrange and pay for the return delivery, or drop the item at our Accra location for free.'
     },
     {
       category: 'returns',
       question: 'Can I exchange an item instead of returning it?',
-      answer: 'Yes! If you need a different size or colour, select "Exchange" when initiating your return. We\'ll send the replacement as soon as we receive your original item. Exchange shipping is FREE.'
+      answer: 'Yes. Mention the size or colour you want in the return request and we\'ll arrange an exchange once we receive the original item, subject to stock.'
     },
     {
       category: 'payment',
@@ -92,12 +92,12 @@ export default function FAQsPage() {
     {
       category: 'payment',
       question: 'Can I pay in instalments?',
-      answer: 'Yes! We offer payment plans through our partners for purchases over GHS 500. Select "Pay in Instalments" at checkout to see available options. Approval is instant and no interest is charged.'
+      answer: 'For pre-order items you can pay a 60% deposit at checkout and settle the balance before the item ships; no interest is charged. In-stock items are paid in full at checkout.'
     },
     {
       category: 'payment',
       question: 'When will my payment be charged?',
-      answer: 'For card and mobile money payments, you\'re charged immediately. For Cash on Delivery, you pay when you receive your order. If an item is out of stock, we\'ll refund you within 24 hours.'
+      answer: 'Mobile money and card payments are charged immediately when you complete checkout. If an item turns out to be unavailable after you have paid, we refund you in full within 2 business days.'
     },
     {
       category: 'payment',
@@ -122,13 +122,8 @@ export default function FAQsPage() {
     {
       category: 'account',
       question: 'How do I update my account information?',
-      answer: 'Log in to your account and go to "Account Settings". You can update your name, email, phone number, password, and saved addresses. Changes are saved instantly and you\'ll receive a confirmation email.'
+      answer: 'Log in and open My Account. You can update your name and phone number, change your password under Security, and manage saved addresses in the Addresses tab. Changes are saved instantly.'
     },
-    {
-      category: 'account',
-      question: 'What are loyalty points and how do they work?',
-      answer: 'Earn 1 point for every GHS 10 spent. 100 points = GHS 10 discount on your next purchase. Points are automatically added to your account after each order. Check your points balance in your account dashboard.'
-    }
   ];
 
   const filteredFAQs = faqs.filter(faq => {

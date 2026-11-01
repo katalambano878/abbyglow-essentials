@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 
 export type CartItem = {
     id: string;
@@ -8,7 +8,10 @@ export type CartItem = {
     price: number;
     image: string;
     quantity: number;
+    /** Display label for the chosen variant, e.g. "Color / Name" */
     variant?: string;
+    /** product_variants.id for the chosen variant (sent to checkout) */
+    variantId?: string | null;
     slug: string;
     maxStock: number;
     moq?: number; // Minimum Order Quantity
@@ -29,115 +32,124 @@ type CartContextType = {
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
+const STORAGE_KEY = 'cart';
+
+const isValidUUID = (str: string) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+
+function readCart(): CartItem[] {
+    if (typeof window === 'undefined') return [];
+    try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (!saved) return [];
+        const parsed: CartItem[] = JSON.parse(saved);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter((item) => {
+            if (!item || !item.id || !item.name || typeof item.price !== 'number') return false;
+            if (!isValidUUID(item.id)) return false; // legacy slug-as-id lines
+            if (!item.slug) item.slug = item.id;
+            if (item.variantId === undefined) item.variantId = null;
+            return true;
+        });
+    } catch (e) {
+        console.error('Failed to parse cart:', e);
+        return [];
+    }
+}
+
+function writeCart(items: CartItem[]) {
+    if (typeof window === 'undefined') return;
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+        window.dispatchEvent(new Event('cartUpdated')); // compatibility with legacy listeners
+    } catch (e) {
+        console.error('Failed to save cart:', e);
+    }
+}
+
+/** Two lines are the same cart line when product id and variant id match (variant label as fallback). */
+function sameLine(a: CartItem, id: string, variantId?: string | null, variantLabel?: string) {
+    if (a.id !== id) return false;
+    if (variantId !== undefined) return (a.variantId ?? null) === (variantId ?? null);
+    return (a.variant || undefined) === (variantLabel || undefined);
+}
+
 export function CartProvider({ children }: { children: ReactNode }) {
     const [cart, setCart] = useState<CartItem[]>([]);
     const [isCartOpen, setIsCartOpen] = useState(false);
-    const [isInitialized, setIsInitialized] = useState(false);
 
-    // Load cart from localStorage on mount, with migration for legacy items
+    // Load cart from localStorage on mount (with legacy-item cleanup)
     useEffect(() => {
-        const savedCart = localStorage.getItem('cart');
-        if (savedCart) {
-            try {
-                const parsed: CartItem[] = JSON.parse(savedCart);
-                // Migrate legacy cart items: if `id` is not a UUID, it's likely a slug
-                const isValidUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
-                const migratedCart = parsed.filter(item => {
-                    if (!item.id || !item.name || !item.price) return false; // Remove corrupted items
-                    if (!isValidUUID(item.id)) {
-                        // Legacy item with slug as id - ensure slug is set, then clear
-                        // These items will be resolved at checkout via the slug fallback
-                        // But best to remove them so users re-add with correct UUIDs
-                        console.warn(`Removing legacy cart item with non-UUID id: ${item.id}`);
-                        return false;
-                    }
-                    // Ensure slug field exists
-                    if (!item.slug) {
-                        item.slug = item.id;
-                    }
-                    return true;
-                });
-                setCart(migratedCart);
-                // If items were removed, update localStorage immediately
-                if (migratedCart.length !== parsed.length) {
-                    localStorage.setItem('cart', JSON.stringify(migratedCart));
-                }
-            } catch (e) {
-                console.error('Failed to parse cart:', e);
-                localStorage.removeItem('cart');
-            }
+        const items = readCart();
+        setCart(items);
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (raw && JSON.parse(raw).length !== items.length) writeCart(items);
+        } catch {
+            writeCart(items);
         }
-        setIsInitialized(true);
     }, []);
 
-    // Save cart to localStorage whenever it changes
-    useEffect(() => {
-        if (isInitialized) {
-            localStorage.setItem('cart', JSON.stringify(cart));
-            window.dispatchEvent(new Event('cartUpdated')); // Keep compatibility with legacy listeners if any
-        }
-    }, [cart, isInitialized]);
+    /**
+     * Every mutation computes the next cart from the latest persisted state and
+     * writes it to localStorage synchronously, so a "Buy now -> /checkout"
+     * navigation can never race the React commit.
+     */
+    const commit = useCallback((updater: (prev: CartItem[]) => CartItem[]) => {
+        const next = updater(readCart());
+        writeCart(next);
+        setCart(next);
+    }, []);
 
-    const addToCart = (newItem: CartItem) => {
-        setCart((prevCart) => {
-            const existingItemIndex = prevCart.findIndex(
-                (item) => item.id === newItem.id && item.variant === newItem.variant
-            );
-
-            if (existingItemIndex > -1) {
-                const newCart = [...prevCart];
-                const existingItem = newCart[existingItemIndex];
-                // Ensure we don't exceed max stock
-                const newQuantity = Math.min(
-                    existingItem.quantity + newItem.quantity,
-                    existingItem.maxStock
-                );
-                newCart[existingItemIndex] = {
-                    ...existingItem,
-                    quantity: newQuantity,
-                    isPreorder: newItem.isPreorder ?? existingItem.isPreorder,
+    const addToCart = useCallback((newItem: CartItem) => {
+        const item: CartItem = { ...newItem, variantId: newItem.variantId ?? null };
+        commit((prev) => {
+            const idx = prev.findIndex((line) => sameLine(line, item.id, item.variantId, item.variant));
+            if (idx > -1) {
+                const existing = prev[idx];
+                const maxStock = item.maxStock > 0 ? item.maxStock : existing.maxStock;
+                const nextCart = [...prev];
+                nextCart[idx] = {
+                    ...existing,
+                    price: item.price,
+                    image: item.image || existing.image,
+                    name: item.name || existing.name,
+                    slug: item.slug || existing.slug,
+                    variant: item.variant ?? existing.variant,
+                    maxStock,
+                    moq: item.moq ?? existing.moq,
+                    isPreorder: item.isPreorder ?? existing.isPreorder,
+                    quantity: Math.min(existing.quantity + item.quantity, maxStock),
                 };
-                return newCart;
-            } else {
-                return [...prevCart, newItem];
+                return nextCart;
             }
+            return [...prev, item];
         });
+        setIsCartOpen(true);
+    }, [commit]);
 
-        setIsCartOpen(true); // Open cart when item is added
-    };
+    const removeFromCart = useCallback((itemId: string, variant?: string) => {
+        commit((prev) => prev.filter((line) => !sameLine(line, itemId, undefined, variant)));
+    }, [commit]);
 
-    const removeFromCart = (itemId: string, variant?: string) => {
-        setCart((prevCart) =>
-            prevCart.filter((item) => !(item.id === itemId && item.variant === variant))
-        );
-    };
-
-    const updateQuantity = (itemId: string, quantity: number, variant?: string) => {
-        setCart((prevCart) => {
-            const item = prevCart.find(i => i.id === itemId && i.variant === variant);
-            if (!item) return prevCart;
-
+    const updateQuantity = useCallback((itemId: string, quantity: number, variant?: string) => {
+        commit((prev) => {
+            const item = prev.find((line) => sameLine(line, itemId, undefined, variant));
+            if (!item) return prev;
             const minQty = item.moq || 1;
-            
-            // If trying to reduce below MOQ, remove the item
             if (quantity < minQty) {
-                return prevCart.filter(i => !(i.id === itemId && i.variant === variant));
+                return prev.filter((line) => !sameLine(line, itemId, undefined, variant));
             }
-
-            // Clamp quantity between MOQ and maxStock
             const clampedQty = Math.min(Math.max(quantity, minQty), item.maxStock);
-
-            return prevCart.map((i) =>
-                i.id === itemId && i.variant === variant
-                    ? { ...i, quantity: clampedQty }
-                    : i
+            return prev.map((line) =>
+                sameLine(line, itemId, undefined, variant) ? { ...line, quantity: clampedQty } : line
             );
         });
-    };
+    }, [commit]);
 
-    const clearCart = () => {
-        setCart([]);
-    };
+    const clearCart = useCallback(() => {
+        commit(() => []);
+    }, [commit]);
 
     const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
     const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);

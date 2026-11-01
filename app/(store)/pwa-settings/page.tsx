@@ -3,6 +3,9 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 
+/** Only runtime caches are safe to drop; the precache/app shell is managed by the service worker. */
+const CLEARABLE_PREFIXES = ['dynamic-', 'images-', 'api-'];
+
 export default function PWASettingsPage() {
   const [isInstalled, setIsInstalled] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
@@ -42,19 +45,56 @@ export default function PWASettingsPage() {
     }
   }, []);
 
+  const [cacheMessage, setCacheMessage] = useState('');
+  const [clearing, setClearing] = useState(false);
+  const [notificationMessage, setNotificationMessage] = useState('');
+
+  const countCachedItems = async () => {
+    if (!('caches' in window)) return 0;
+    const cacheNames = await caches.keys();
+    const counts = await Promise.all(
+      cacheNames.map((cacheName) =>
+        caches.open(cacheName).then((cache) => cache.keys().then((keys) => keys.length))
+      )
+    );
+    return counts.reduce((a, b) => a + b, 0);
+  };
+
   const clearCache = async () => {
-    if ('caches' in window) {
+    if (!('caches' in window)) {
+      setCacheMessage('This browser does not support offline caching.');
+      return;
+    }
+    setClearing(true);
+    setCacheMessage('');
+    try {
       const cacheNames = await caches.keys();
-      await Promise.all(cacheNames.map((name) => caches.delete(name)));
-      setCacheSize(0);
-      alert('Cache cleared successfully!');
+      const clearable = cacheNames.filter((name) => CLEARABLE_PREFIXES.some((p) => name.startsWith(p)));
+      await Promise.all(clearable.map((name) => caches.delete(name)));
+      setCacheSize(await countCachedItems());
+      setCacheMessage(
+        clearable.length > 0
+          ? 'Cached pages, images and data were cleared. The app shell stays so the site still opens offline.'
+          : 'There was nothing to clear.'
+      );
+    } catch {
+      setCacheMessage('Could not clear the cache. Please try again.');
+    } finally {
+      setClearing(false);
     }
   };
 
   const requestNotificationPermission = async () => {
-    if ('Notification' in window) {
-      const permission = await Notification.requestPermission();
-      setNotificationPermission(permission);
+    if (!('Notification' in window)) {
+      setNotificationMessage('This browser does not support notifications.');
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+    if (permission === 'granted') {
+      setNotificationMessage('Permission granted. Push alerts for order updates are coming soon; we will use this permission once they launch.');
+    } else if (permission === 'denied') {
+      setNotificationMessage('Notifications are blocked for this site. You can change that in your browser settings.');
     }
   };
 
@@ -140,29 +180,16 @@ export default function PWASettingsPage() {
                 )}
               </div>
 
-              {notificationPermission === 'granted' && (
-                <div className="bg-brand-soft border border-brand/30 rounded-xl p-4">
-                  <p className="text-sm text-brand font-medium mb-2">You will receive notifications for:</p>
-                  <ul className="space-y-1 text-sm text-brand">
-                    <li className="flex items-center gap-2">
-                      <i className="ri-check-line"></i>
-                      <span>Order confirmations and updates</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <i className="ri-check-line"></i>
-                      <span>Flash sales and exclusive deals</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <i className="ri-check-line"></i>
-                      <span>Wishlist price drops</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <i className="ri-check-line"></i>
-                      <span>Back in stock alerts</span>
-                    </li>
-                  </ul>
-                </div>
+              {notificationMessage && (
+                <p className="text-sm text-gray-600 px-1" role="status">{notificationMessage}</p>
               )}
+
+              <div className="bg-brand-soft border border-brand/30 rounded-xl p-4">
+                <p className="text-sm text-brand font-medium mb-1">Push alerts are coming soon</p>
+                <p className="text-sm text-brand">
+                  Granting permission now means order updates and restock alerts will reach you as soon as we switch them on. Until then, we keep you posted by email and SMS.
+                </p>
+              </div>
             </div>
           </div>
 
@@ -184,7 +211,7 @@ export default function PWASettingsPage() {
                 <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
                   <div
                     className="bg-orange-600 h-full rounded-full transition-all"
-                    style={{ width: `${(storageUsage.used / storageUsage.quota) * 100}%` }}
+                    style={{ width: `${storageUsage.quota > 0 ? Math.min(100, (storageUsage.used / storageUsage.quota) * 100) : 0}%` }}
                   ></div>
                 </div>
               </div>
@@ -196,18 +223,22 @@ export default function PWASettingsPage() {
                 </div>
                 <button
                   onClick={clearCache}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors whitespace-nowrap"
+                  disabled={clearing}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors whitespace-nowrap disabled:opacity-50"
                 >
-                  Clear Cache
+                  {clearing ? 'Clearing...' : 'Clear Cache'}
                 </button>
               </div>
+              {cacheMessage && (
+                <p className="text-sm text-gray-600 px-1" role="status">{cacheMessage}</p>
+              )}
 
               <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
                 <div className="flex items-start gap-3">
                   <i className="ri-information-line text-yellow-700 text-xl"></i>
                   <div className="text-sm text-yellow-800">
                     <p className="font-medium mb-1">About Cache</p>
-                    <p>Cached data helps the app load faster and work offline. Clearing cache will remove offline access temporarily.</p>
+                    <p>Cached data helps the app load faster and work offline. Clearing it removes saved pages, images and product data; they are cached again as you browse.</p>
                   </div>
                 </div>
               </div>

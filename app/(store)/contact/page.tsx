@@ -53,35 +53,48 @@ export default function ContactPage() {
     }
 
     try {
-      // Store in Supabase
-      const { error } = await supabase
-        .from('contact_submissions')
-        .insert({
-          name: formData.name,
-          email: formData.email,
-          phone: formData.phone,
-          subject: formData.subject,
-          message: formData.message,
-        });
+      const payload = {
+        name: formData.name.trim(),
+        email: formData.email.trim(),
+        phone: formData.phone.trim(),
+        subject: formData.subject.trim(),
+        message: formData.message.trim(),
+      };
 
-      if (error) {
-        // Table might not exist, still show success
-        console.log('Note: contact_submissions table may not exist');
+      // Store the message and notify the team; either one succeeding means we have it.
+      const [insertResult, notifyResult] = await Promise.allSettled([
+        supabase.from('contact_submissions').insert(payload),
+        fetch('/api/notifications', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'contact', payload }),
+        }),
+      ]);
+
+      const insertOk = insertResult.status === 'fulfilled' && !insertResult.value.error;
+      const notifyOk = notifyResult.status === 'fulfilled' && notifyResult.value.ok;
+
+      if (!insertOk) {
+        console.error(
+          'Contact submission insert failed:',
+          insertResult.status === 'fulfilled' ? insertResult.value.error?.message : insertResult.reason
+        );
+      }
+      if (!notifyOk) {
+        console.error(
+          'Contact notification failed:',
+          notifyResult.status === 'fulfilled' ? notifyResult.value.status : notifyResult.reason
+        );
       }
 
-      // Send Contact Notification
-      fetch('/api/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'contact',
-          payload: formData
-        })
-      }).catch(err => console.error('Contact notification error:', err));
-
-      setSubmitStatus('success');
-      setFormData({ name: '', email: '', phone: '', subject: '', message: '' });
+      if (insertOk || notifyOk) {
+        setSubmitStatus('success');
+        setFormData({ name: '', email: '', phone: '', subject: '', message: '' });
+      } else {
+        setSubmitStatus('error');
+      }
     } catch (error) {
+      console.error('Contact submit error:', error);
       setSubmitStatus('error');
     } finally {
       setIsSubmitting(false);

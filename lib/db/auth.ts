@@ -2,12 +2,26 @@
 
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
-import { randomUUID } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
 import { query } from "./pool";
 import { authJwtSecret } from "./mode";
 
-const ACCESS_TTL_SEC = 60 * 60 * 24 * 7; // 7 days
+const ACCESS_TTL_SEC = 60 * 60 * 24; // 24 hours (supabase-js refreshes silently)
 const REFRESH_TTL_SEC = 60 * 60 * 24 * 30; // 30 days
+const RECOVERY_TTL_SEC = 60 * 60; // password-reset links are valid for 1 hour
+export const MIN_PASSWORD_LENGTH = 8;
+
+export function validatePassword(password: string): string | null {
+  if (!password || password.length < MIN_PASSWORD_LENGTH) {
+    return `Password must be at least ${MIN_PASSWORD_LENGTH} characters`;
+  }
+  if (password.length > 128) return "Password is too long";
+  return null;
+}
+
+function hashToken(raw: string): string {
+  return createHash("sha256").update(raw).digest("hex");
+}
 
 export interface AuthUser {
   id: string;
@@ -187,8 +201,12 @@ export async function signUpWithPassword(opts: {
   data?: Record<string, unknown>;
 }): Promise<{ session: SessionTokens | null; user: AuthUser | null; error: string | null }> {
   const email = opts.email.trim().toLowerCase();
-  if (!email || !opts.password || opts.password.length < 6) {
-    return { session: null, user: null, error: "Email and password (min 6 chars) required" };
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+    return { session: null, user: null, error: "A valid email address is required" };
+  }
+  const passwordError = validatePassword(opts.password);
+  if (passwordError) {
+    return { session: null, user: null, error: passwordError };
   }
 
   const existing = await query(`SELECT id FROM auth.users WHERE lower(email) = $1 LIMIT 1`, [
@@ -200,7 +218,16 @@ export async function signUpWithPassword(opts: {
 
   const id = randomUUID();
   const hash = bcrypt.hashSync(opts.password, 10);
-  const meta = opts.data || {};
+  const meta: Record<string, unknown> = { ...(opts.data || {}) };
+  // The storefront sign-up form sends first_name / last_name; keep a full_name
+  // too so profiles and emails have a display name.
+  const firstName = typeof meta.first_name === "string" ? meta.first_name.trim() : "";
+  const lastName = typeof meta.last_name === "string" ? meta.last_name.trim() : "";
+  if (typeof meta.full_name !== "string" || !meta.full_name.trim()) {
+    const composed = `${firstName} ${lastName}`.trim();
+    if (composed) meta.full_name = composed;
+  }
+  const phone = typeof meta.phone === "string" ? meta.phone.trim() : null;
 
   await query(
     `INSERT INTO auth.users (
@@ -218,10 +245,13 @@ export async function signUpWithPassword(opts: {
 
   // Ensure profile row exists (app expects profiles.id = auth.users.id)
   await query(
-    `INSERT INTO profiles (id, email, full_name, role, created_at, updated_at)
-     VALUES ($1, $2, $3, 'customer', now(), now())
-     ON CONFLICT (id) DO NOTHING`,
-    [id, email, (meta.full_name as string) || email.split("@")[0]]
+    `INSERT INTO profiles (id, email, full_name, phone, role, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 'customer', now(), now())
+     ON CONFLICT (id) DO UPDATE SET
+       full_name = COALESCE(EXCLUDED.full_name, profiles.full_name),
+       phone = COALESCE(EXCLUDED.phone, profiles.phone),
+       updated_at = now()`,
+    [id, email, (meta.full_name as string) || email.split("@")[0], phone || null]
   ).catch(() => {});
 
   const { rows } = await query(`SELECT * FROM auth.users WHERE id = $1`, [id]);
@@ -260,12 +290,15 @@ export async function updateUserPassword(
   userId: string,
   password: string
 ): Promise<{ user: AuthUser | null; error: string | null }> {
-  if (!password || password.length < 6) {
-    return { user: null, error: "Password must be at least 6 characters" };
+  const passwordError = validatePassword(password);
+  if (passwordError) {
+    return { user: null, error: passwordError };
   }
   const hash = bcrypt.hashSync(password, 10);
   await query(
-    `UPDATE auth.users SET encrypted_password = $1, updated_at = now() WHERE id = $2`,
+    `UPDATE auth.users
+        SET encrypted_password = $1, recovery_token = '', recovery_sent_at = NULL, updated_at = now()
+      WHERE id = $2`,
     [hash, userId]
   );
   const user = await getUserById(userId);
@@ -299,4 +332,69 @@ export async function updateUserMetadata(
   }
   const user = await getUserById(userId);
   return { user, error: null };
+}
+
+/**
+ * Password recovery: store a hashed single-use token on the user and return the
+ * raw token for the email link. Returns null when no such account exists (the
+ * caller must still answer 200 so emails cannot be enumerated).
+ */
+export async function createRecoveryToken(
+  email: string
+): Promise<{ userId: string; email: string; token: string; fullName: string | null } | null> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return null;
+  const { rows } = await query<{ id: string; email: string; raw_user_meta_data: any }>(
+    `SELECT id, email, raw_user_meta_data FROM auth.users
+      WHERE lower(email) = $1 AND deleted_at IS NULL LIMIT 1`,
+    [normalized]
+  );
+  const row = rows[0];
+  if (!row) return null;
+  const token = randomBytes(32).toString("hex");
+  await query(
+    `UPDATE auth.users SET recovery_token = $1, recovery_sent_at = now(), updated_at = now() WHERE id = $2`,
+    [hashToken(token), row.id]
+  );
+  const meta =
+    typeof row.raw_user_meta_data === "string"
+      ? JSON.parse(row.raw_user_meta_data || "{}")
+      : row.raw_user_meta_data || {};
+  const fullName =
+    (typeof meta.full_name === "string" && meta.full_name) ||
+    [meta.first_name, meta.last_name].filter(Boolean).join(" ") ||
+    null;
+  return { userId: row.id, email: row.email, token, fullName };
+}
+
+/** Exchange a recovery token for a short session so the user can set a new password. */
+export async function consumeRecoveryToken(
+  token: string
+): Promise<{ session: SessionTokens | null; error: string | null }> {
+  if (!token || !/^[a-f0-9]{64}$/i.test(token)) {
+    return { session: null, error: "Invalid or expired reset link" };
+  }
+  const { rows } = await query(
+    `SELECT id, email, phone, encrypted_password, email_confirmed_at,
+            phone_confirmed_at, last_sign_in_at, raw_app_meta_data,
+            raw_user_meta_data, created_at, updated_at, recovery_sent_at
+       FROM auth.users
+      WHERE recovery_token = $1 AND deleted_at IS NULL
+      LIMIT 1`,
+    [hashToken(token.toLowerCase())]
+  );
+  const row = rows[0];
+  if (!row) return { session: null, error: "Invalid or expired reset link" };
+  const sentAt = row.recovery_sent_at ? new Date(row.recovery_sent_at).getTime() : 0;
+  if (!sentAt || Date.now() - sentAt > RECOVERY_TTL_SEC * 1000) {
+    await query(`UPDATE auth.users SET recovery_token = '' WHERE id = $1`, [row.id]).catch(() => {});
+    return { session: null, error: "This reset link has expired. Please request a new one." };
+  }
+  // Single use.
+  await query(
+    `UPDATE auth.users SET recovery_token = '', recovery_sent_at = NULL, updated_at = now() WHERE id = $1`,
+    [row.id]
+  );
+  const session = await mintSession(row);
+  return { session, error: null };
 }

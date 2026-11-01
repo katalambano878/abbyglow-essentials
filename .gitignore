@@ -36,3 +36,8 @@ migration-artifacts/dumps/
 migration-artifacts/storage/
 
 .env.staging
+
+# Local object storage (plain-Postgres mode) and local DB url helper
+.storage/
+.env.dburl
+*.bak

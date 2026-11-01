@@ -33,6 +33,18 @@ export async function POST(req: Request) {
     if (!isGatewayConfigured(gateway)) {
       return NextResponse.json({ success: false, message: `${gateway} is not configured` }, { status: 503 });
     }
+    if (!/^[A-Za-z0-9-]{6,64}$/.test(orderId)) {
+      return NextResponse.json({ success: false, message: 'Invalid orderId' }, { status: 400 });
+    }
+    // A single order gets a handful of payment sessions; anyone replaying an
+    // order number cannot churn gateway references or payment_attempts rows.
+    const perOrder = checkRateLimit(`payment-order:${orderId}`, { maxRequests: 6, windowSeconds: 10 * 60 });
+    if (!perOrder.success) {
+      return NextResponse.json(
+        { success: false, message: 'Too many payment attempts for this order. Please wait a few minutes.' },
+        { status: 429 }
+      );
+    }
 
     const requestUrl = new URL(req.url);
     const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || requestUrl.origin).replace(/\/+$/, '');

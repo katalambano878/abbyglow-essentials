@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
-import { fetchAdminCustomers, insightSegment } from '@/lib/admin/customers';
+import { fetchAdminCustomers, insightSegment, toCsv } from '@/lib/admin/customers';
 
 // Helper for currency formatting
 const formatCurrency = (amount: number) => {
@@ -97,6 +97,34 @@ export default function CustomerInsightsPage() {
     return matchesSearch && matchesSegment;
   });
 
+  const handleExport = () => {
+    const csv = toCsv([
+      ['Name', 'Email', 'Phone', 'Segment', 'Orders', 'Total Spent', 'Avg Order', 'Risk', 'Engagement', 'Joined', 'Last Order'],
+      ...filteredCustomers.map((c) => [
+        c.name,
+        c.email,
+        c.phone === '-' ? '' : c.phone,
+        c.segment,
+        c.orders,
+        Number(c.totalSpent).toFixed(2),
+        Number(c.avgOrderValue).toFixed(2),
+        c.riskLevel,
+        c.engagementScore,
+        c.joinDate.slice(0, 10),
+        c.lastOrder.slice(0, 10),
+      ]),
+    ]);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `customer-insights-${selectedSegment}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  };
+
   const getSegmentBadge = (segment: string) => {
     const badges: any = {
       vip: 'bg-brand-soft text-brand',
@@ -137,9 +165,13 @@ export default function CustomerInsightsPage() {
             <p className="text-gray-600 mt-1 md:mt-2 text-sm md:text-base">Deep dive into customer behavior and lifetime value</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-3">
-            <button className="border-2 border-gray-300 hover:border-gray-400 text-gray-700 px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center justify-center">
+            <button
+              onClick={handleExport}
+              disabled={filteredCustomers.length === 0}
+              className="border-2 border-gray-300 hover:border-gray-400 text-gray-700 px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center justify-center cursor-pointer disabled:opacity-50"
+            >
               <i className="ri-download-line mr-2"></i>
-              Export List
+              Export List ({filteredCustomers.length})
             </button>
             <Link
               href="/admin"

@@ -45,52 +45,44 @@ export default function AnalyticsPage() {
 
       const isoStart = startDate.toISOString();
 
-      // Fetch Orders for Revenue & Count - only PAID orders count as revenue
+      // Revenue = money received (amount_paid) on paid + partially paid orders
       const { data: orders, error: orderError } = await supabase
         .from('orders')
-        .select('id, created_at, total, payment_status')
+        .select('id, created_at, total, amount_paid, payment_status')
         .gte('created_at', isoStart)
-        .eq('payment_status', 'paid') // Only count paid orders as revenue
+        .in('payment_status', ['paid', 'partially_paid'])
         .neq('status', 'cancelled')
         .order('created_at');
 
       if (orderError) throw orderError;
 
-      // Fetch Order Items for Products & Categories
-      // This might be heavy for large DBs, but fine for typical small shop admin
-      const { data: items, error: itemError } = await supabase
-        .from('order_items')
-        .select(`
-            *,
-            products (name, categories(name))
-         `)
-        .gte('created_at', isoStart); // Assuming order_items has created_at or join orders.. 
-      // Actually order_items usually doesn't have created_at directly in some schemas, 
-      // so we should join orders to filter by date.
-      // Simpler: fetch order_items for the fetched orders IDs.
-
+      // Line items for those orders, fetched in chunks of 100 ids
       let validItems: any[] = [];
       if (orders && orders.length > 0) {
         const orderIds = orders.map(o => o.id);
-        const { data: fetchedItems, error: itemFetchError } = await supabase
-          .from('order_items')
-          .select(`
-            quantity, 
-            unit_price, 
-            total_price,
-            product_id,
-            products(name, category_id, categories(name))
-          `)
-          .in('order_id', orderIds);
+        for (let i = 0; i < orderIds.length; i += 100) {
+          const { data: fetchedItems, error: itemFetchError } = await supabase
+            .from('order_items')
+            .select(`
+              quantity,
+              unit_price,
+              total_price,
+              product_id,
+              product_name,
+              products(name, category_id, categories(name))
+            `)
+            .in('order_id', orderIds.slice(i, i + 100));
 
-        if (itemFetchError) {
-          console.error('Error fetching order items:', itemFetchError);
+          if (itemFetchError) {
+            console.error('Error fetching order items:', itemFetchError);
+            break;
+          }
+          if (fetchedItems) validItems = validItems.concat(fetchedItems);
         }
-        if (fetchedItems) validItems = fetchedItems;
       }
 
       // Process Metrics
-      const totalRevenue = orders?.reduce((sum, o) => sum + (o.total || 0), 0) || 0;
+      const totalRevenue = orders?.reduce((sum, o) => sum + (Number(o.amount_paid) || 0), 0) || 0;
       const totalOrders = orders?.length || 0;
       const aov = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
@@ -125,7 +117,7 @@ export default function AnalyticsPage() {
       orders?.forEach(o => {
         const dateKey = new Date(o.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         if (salesMap[dateKey]) {
-          salesMap[dateKey].sales += o.total || 0;
+          salesMap[dateKey].sales += Number(o.amount_paid) || 0;
           salesMap[dateKey].orders += 1;
         }
       });
@@ -148,7 +140,7 @@ export default function AnalyticsPage() {
       // Process Top Products
       const prodMap: Record<string, any> = {};
       validItems.forEach(item => {
-        const pName = item.products?.name || 'Unknown';
+        const pName = item.products?.name || item.product_name || 'Unknown';
         if (!prodMap[pName]) prodMap[pName] = { name: pName, revenue: 0, units: 0 };
         const itemRevenue = item.total_price || (item.unit_price * item.quantity) || 0;
         prodMap[pName].revenue += itemRevenue;
@@ -165,6 +157,28 @@ export default function AnalyticsPage() {
   };
 
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
+
+  const csvCell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const handleExport = () => {
+    const lines: unknown[][] = [
+      ['Section', 'Label', 'Revenue (GH₵)', 'Orders / Units'],
+      ...salesData.map((d) => ['Daily sales', d.date, Number(d.sales).toFixed(2), d.orders]),
+      ...categoryRevenue.map((c) => ['Revenue by category', c.name, Number(c.value).toFixed(2), '']),
+      ...topProducts.map((p) => ['Top products', p.name, Number(p.revenue).toFixed(2), p.units]),
+      ['Summary', 'Total revenue', metrics.revenue.toFixed(2), metrics.orders],
+      ['Summary', 'Average order value', metrics.aov.toFixed(2), ''],
+    ];
+    const csv = lines.map((row) => row.map(csvCell).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `analytics-${timeRange}-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -185,9 +199,13 @@ export default function AnalyticsPage() {
               <option value="90days">Last 90 Days</option>
               <option value="year">This Year</option>
             </select>
-            <button className="bg-brand hover:bg-brand-dark text-white px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap cursor-pointer flex items-center justify-center">
+            <button
+              onClick={handleExport}
+              disabled={loading}
+              className="bg-brand hover:bg-brand-dark text-white px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap cursor-pointer flex items-center justify-center disabled:opacity-50"
+            >
               <i className="ri-download-line mr-2"></i>
-              Export
+              Export CSV
             </button>
             <Link
               href="/admin"
@@ -207,8 +225,9 @@ export default function AnalyticsPage() {
               </div>
               <span className="text-brand font-semibold text-sm">Live</span>
             </div>
-            <p className="text-sm text-gray-600 mb-1">Total Revenue</p>
-            <p className="text-3xl font-bold text-gray-900">GH₵{metrics.revenue.toLocaleString()}</p>
+            <p className="text-sm text-gray-600 mb-1">Revenue Received</p>
+            <p className="text-3xl font-bold text-gray-900">GH₵{metrics.revenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p className="text-xs text-gray-400 mt-1">Paid + partially paid, amount received</p>
           </div>
 
           <div className="bg-white rounded-xl shadow-sm p-6">

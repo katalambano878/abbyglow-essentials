@@ -44,8 +44,12 @@ export default function UpdatePrompt() {
   }, []);
 
   const handleUpdate = () => {
+    (window as any).__abbyglowSwUpdateRequested = true;
     if (registration?.waiting) {
+      // The worker activates on this message; PWAInstaller reloads on controllerchange.
       registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+      setShowPrompt(false);
+      return;
     }
     window.location.reload();
   };

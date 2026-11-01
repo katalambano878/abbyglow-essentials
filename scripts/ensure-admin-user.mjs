@@ -4,7 +4,11 @@ import bcrypt from 'bcryptjs';
 import { randomUUID } from 'crypto';
 
 const email = (process.argv[2] || 'admin@example.com').trim().toLowerCase();
-const password = process.argv[3] || 'admin123';
+const password = process.argv[3] || process.env.ADMIN_PASSWORD || '';
+if (!password || password.length < 12) {
+  console.error('Usage: node scripts/ensure-admin-user.mjs <email> <password>  (password must be at least 12 characters; no default is applied)');
+  process.exit(1);
+}
 
 function loadDbUrl() {
   if (process.env.DATABASE_URL) return process.env.DATABASE_URL;

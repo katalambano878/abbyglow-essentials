@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useCMS } from '@/context/CMSContext';
 import BrandLogo from './BrandLogo';
+import CookieConsent from './CookieConsent';
 
 function FooterSection({ title, children }: { title: string, children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -131,6 +132,7 @@ export default function Footer() {
           </div>
         </div>
       </div>
+      <CookieConsent />
     </footer>
   );
 }

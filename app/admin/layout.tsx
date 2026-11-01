@@ -6,6 +6,21 @@ import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
+const ACCESS_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
+
+/** `Secure` only over https — on plain-http dev hosts the browser would silently drop the cookie. */
+const cookieFlags = () =>
+  `path=/; SameSite=Lax${typeof window !== 'undefined' && window.location.protocol === 'https:' ? '; Secure' : ''}`;
+
+const setAdminAccessCookie = (token: string) => {
+  document.cookie = `sb-access-token=${token}; max-age=${ACCESS_COOKIE_MAX_AGE}; ${cookieFlags()}`;
+};
+
+const clearAdminCookies = () => {
+  document.cookie = `sb-access-token=; max-age=0; ${cookieFlags()}`;
+  document.cookie = `sb-refresh-token=; max-age=0; ${cookieFlags()}`;
+};
+
 export default function AdminLayout({
   children,
 }: {
@@ -33,12 +48,13 @@ export default function AdminLayout({
       }
 
       if (!session) {
-        router.push('/admin/login');
+        clearAdminCookies();
+        router.push(`/admin/login?error=session_expired&redirect=${encodeURIComponent(pathname)}`);
         return;
       }
 
       // Ensure auth cookie is set (in case user already had a session from before)
-      document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`;
+      setAdminAccessCookie(session.access_token);
 
       // Check user role from profiles table
       const { data: profile, error: profileError } = await supabase
@@ -56,8 +72,9 @@ export default function AdminLayout({
       // Only allow admin and staff roles
       if (profile.role !== 'admin' && profile.role !== 'staff') {
         console.warn('User does not have admin/staff role');
-        document.cookie = 'sb-access-token=; path=/; max-age=0; SameSite=Lax; Secure';
+        clearAdminCookies();
         await supabase.auth.signOut();
+        clearAdminCookies();
         router.push('/admin/login?error=unauthorized');
         return;
       }
@@ -73,11 +90,10 @@ export default function AdminLayout({
     // Keep cookie in sync when session refreshes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'TOKEN_REFRESHED' && session) {
-        document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`;
+        setAdminAccessCookie(session.access_token);
       }
       if (event === 'SIGNED_OUT') {
-        document.cookie = 'sb-access-token=; path=/; max-age=0; SameSite=Lax; Secure';
-        document.cookie = 'sb-refresh-token=; path=/; max-age=0; SameSite=Lax; Secure';
+        clearAdminCookies();
       }
     });
 
@@ -96,7 +112,7 @@ export default function AdminLayout({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showUserMenu]);
 
-  // Fetch Modules Effect
+  // Fetch Modules Effect (re-runs when the Modules page toggles a feature)
   useEffect(() => {
     async function fetchModules() {
       try {
@@ -113,6 +129,8 @@ export default function AdminLayout({
       }
     }
     fetchModules();
+    window.addEventListener('abbyglow:modules-changed', fetchModules);
+    return () => window.removeEventListener('abbyglow:modules-changed', fetchModules);
   }, []);
 
   // Screen size check for initial state
@@ -133,10 +151,10 @@ export default function AdminLayout({
   }, []);
 
   const handleLogout = async () => {
-    // Clear auth cookies set during login
-    document.cookie = 'sb-access-token=; path=/; max-age=0; SameSite=Lax; Secure';
-    document.cookie = 'sb-refresh-token=; path=/; max-age=0; SameSite=Lax; Secure';
+    // Clear auth cookies set during login, then again after sign-out in case a refresh re-set them
+    clearAdminCookies();
     await supabase.auth.signOut();
+    clearAdminCookies();
     router.push('/admin/login');
   };
 
@@ -144,7 +162,17 @@ export default function AdminLayout({
     return <div className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-500">Loading Admin...</div>;
   }
 
-  const menuItems = [
+  type MenuItem = {
+    title: string;
+    icon: string;
+    path: string;
+    exact?: boolean;
+    badge?: string;
+    moduleId?: string;
+    adminOnly?: boolean;
+  };
+
+  const menuItems: MenuItem[] = [
     {
       title: 'Dashboard',
       icon: 'ri-dashboard-line',
@@ -165,7 +193,8 @@ export default function AdminLayout({
     {
       title: 'Buy SMS',
       icon: 'ri-message-2-line',
-      path: '/admin/sms-credit'
+      path: '/admin/sms-credit',
+      adminOnly: true
     },
     {
       title: 'Products',
@@ -217,7 +246,8 @@ export default function AdminLayout({
     {
       title: 'SMS Debugger',
       icon: 'ri-message-2-line',
-      path: '/admin/test-sms'
+      path: '/admin/test-sms',
+      adminOnly: true
     },
 
     {
@@ -229,14 +259,14 @@ export default function AdminLayout({
     {
       title: 'Modules',
       icon: 'ri-puzzle-line',
-      path: '/admin/modules'
+      path: '/admin/modules',
+      adminOnly: true
     },
   ];
 
   const visibleMenuItems = menuItems.filter(item => {
-    // @ts-ignore
+    if (item.adminOnly && userRole !== 'admin') return false;
     if (!item.moduleId) return true;
-    // @ts-ignore
     return enabledModules.includes(item.moduleId);
   });
 

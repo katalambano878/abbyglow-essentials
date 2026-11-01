@@ -15,10 +15,34 @@ interface ProductFormProps {
 const toSlug = (value: string) =>
     value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
 
+const ALLOWED_IMAGE_TYPES: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/avif': 'avif',
+};
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const PRODUCTS_BUCKET = 'products';
+
+/** Returns the object path inside the products bucket for a public URL we uploaded, or null. */
+const storagePathFromUrl = (url: string): string | null => {
+    const marker = `/storage/v1/object/public/${PRODUCTS_BUCKET}/`;
+    const idx = url.indexOf(marker);
+    if (idx === -1) return null;
+    const rest = url.slice(idx + marker.length).split('?')[0];
+    try {
+        return decodeURIComponent(rest);
+    } catch {
+        return rest;
+    }
+};
+
 export default function ProductForm({ initialData, isEditMode = false }: ProductFormProps) {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
     const [categories, setCategories] = useState<any[]>([]);
+    const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
     const [productName, setProductName] = useState(initialData?.name || '');
     const [categoryId, setCategoryId] = useState(initialData?.category_id || '');
@@ -29,7 +53,7 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
     const [moq, setMoq] = useState(initialData?.moq || '1');
     const [lowStockThreshold, setLowStockThreshold] = useState(initialData?.metadata?.low_stock_threshold || '5');
     const [description, setDescription] = useState(initialData?.description || '');
-    const [status, setStatus] = useState(initialData?.status || 'Active');
+    const [status, setStatus] = useState<string>((initialData?.status || 'active').toLowerCase());
     const [featured, setFeatured] = useState(initialData?.featured || false);
     const [isPreorder, setIsPreorder] = useState(() =>
         initialData ? isPreorderProduct(initialData?.metadata) : false
@@ -76,8 +100,15 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
         ...v,
         stock: v.stock ?? v.quantity ?? 0,
         color: v.color ?? v.option2 ?? '',
-        size: v.name || ''
+        // option1 holds the size; legacy rows without options used name for the size
+        size: v.option1 ?? (v.option2 || v.name === 'Default' ? '' : (v.name || ''))
     }));
+
+    // key "color|||size" → existing row id, used to diff variants on save
+    const existingVariantIdByKey: Record<string, string> = {};
+    existingVariants.forEach((v: any) => {
+        existingVariantIdByKey[`${v.color || ''}|||${v.size || ''}`] = v.id;
+    });
 
     const [selectedColors, setSelectedColors] = useState<{ name: string; hex: string }[]>(() => {
         const colors = new Map<string, string>();
@@ -198,9 +229,12 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
         setCustomSize('');
     };
 
-    // Images
-    const [images, setImages] = useState<any[]>(initialData?.product_images || []);
+    // Images (sorted by saved position so the primary image stays first)
+    const [images, setImages] = useState<any[]>(() =>
+        [...(initialData?.product_images || [])].sort((a: any, b: any) => (a.position ?? 0) - (b.position ?? 0))
+    );
     const [uploading, setUploading] = useState(false);
+    const initialImages: any[] = initialData?.product_images || [];
 
     // SEO
     const [seoTitle, setSeoTitle] = useState(initialData?.seo_title || '');
@@ -217,19 +251,18 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
         { id: 'seo', label: 'SEO', icon: 'ri-search-line' }
     ];
 
-    // Fetch categories on mount
+    // Fetch categories once on mount
     useEffect(() => {
+        let cancelled = false;
         async function fetchCategories() {
-            const { data } = await supabase.from('categories').select('id, name').eq('status', 'active');
-            if (data) {
-                setCategories(data);
-                if (data.length > 0 && !categoryId) {
-                    setCategoryId(data[0].id);
-                }
-            }
+            const { data } = await supabase.from('categories').select('id, name').eq('status', 'active').order('name');
+            if (cancelled || !data) return;
+            setCategories(data);
+            setCategoryId((current: string) => current || (data.length > 0 ? data[0].id : ''));
         }
         fetchCategories();
-    }, [categoryId]);
+        return () => { cancelled = true; };
+    }, []);
 
     // Keep slug in sync with product name until user edits slug manually.
     useEffect(() => {
@@ -246,31 +279,47 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
     }, [isEditMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const input = e.target;
         try {
-            if (!e.target.files || e.target.files.length === 0) return;
+            if (!input.files || input.files.length === 0) return;
+            const file = input.files[0];
+
+            const ext = ALLOWED_IMAGE_TYPES[file.type];
+            if (!ext) {
+                setNotice({ type: 'error', text: 'Unsupported image type. Use JPEG, PNG, WebP, GIF or AVIF.' });
+                return;
+            }
+            if (file.size > MAX_IMAGE_BYTES) {
+                setNotice({ type: 'error', text: `Image is ${(file.size / 1024 / 1024).toFixed(1)} MB — the limit is 10 MB.` });
+                return;
+            }
+            if (images.length >= 10) {
+                setNotice({ type: 'error', text: 'A product can have at most 10 images.' });
+                return;
+            }
 
             setUploading(true);
-            const file = e.target.files[0];
-            const fileExt = file.name.split('.').pop();
-            const fileName = `${Math.random()}.${fileExt}`;
-            const filePath = `${fileName}`;
+            setNotice(null);
+            const baseSlug = toSlug(urlSlug || productName) || 'product';
+            const filePath = `${baseSlug}-${Date.now()}.${ext}`;
 
             const { error: uploadError } = await supabase.storage
-                .from('products')
-                .upload(filePath, file);
+                .from(PRODUCTS_BUCKET)
+                .upload(filePath, file, { contentType: file.type });
 
             if (uploadError) throw uploadError;
 
             const { data: { publicUrl } } = supabase.storage
-                .from('products')
+                .from(PRODUCTS_BUCKET)
                 .getPublicUrl(filePath);
 
-            setImages([...images, { url: publicUrl, position: images.length }]);
+            setImages((prev) => [...prev, { url: publicUrl, position: prev.length }]);
 
         } catch (error: any) {
-            alert('Error uploading image: ' + error.message);
+            setNotice({ type: 'error', text: 'Error uploading image: ' + (error?.message || 'unknown error') });
         } finally {
             setUploading(false);
+            input.value = '';
         }
     };
 
@@ -278,11 +327,113 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
         setImages(images.filter((_, idx) => idx !== indexToRemove));
     };
 
+    /** Diff product_images by url: insert new, update moved positions, delete removed (+ storage object best-effort). */
+    const syncImages = async (productId: string) => {
+        const currentUrls = new Set(images.map((img) => img.url));
+        const initialByUrl = new Map<string, any>(initialImages.map((img: any) => [img.url, img]));
+
+        const removed = initialImages.filter((img: any) => !currentUrls.has(img.url));
+        if (removed.length > 0) {
+            const { error } = await supabase
+                .from('product_images')
+                .delete()
+                .in('id', removed.map((img: any) => img.id));
+            if (error) throw new Error(`Could not remove images: ${error.message}`);
+
+            const paths = removed.map((img: any) => storagePathFromUrl(img.url)).filter(Boolean) as string[];
+            if (paths.length > 0) {
+                const { error: storageError } = await supabase.storage.from(PRODUCTS_BUCKET).remove(paths);
+                if (storageError) console.warn('Could not delete storage objects:', storageError.message);
+            }
+        }
+
+        const inserts: any[] = [];
+        for (let idx = 0; idx < images.length; idx++) {
+            const img = images[idx];
+            const existing = initialByUrl.get(img.url);
+            if (existing) {
+                if (existing.position !== idx || (existing.alt_text || '') !== productName) {
+                    const { error } = await supabase
+                        .from('product_images')
+                        .update({ position: idx, alt_text: productName })
+                        .eq('id', existing.id);
+                    if (error) throw new Error(`Could not update image order: ${error.message}`);
+                }
+            } else {
+                inserts.push({ product_id: productId, url: img.url, position: idx, alt_text: productName });
+            }
+        }
+        if (inserts.length > 0) {
+            const { error } = await supabase.from('product_images').insert(inserts);
+            if (error) throw new Error(`Could not save new images: ${error.message}`);
+        }
+    };
+
+    /** Diff product_variants by id: update existing combos, insert new ones, delete removed ones. */
+    const syncVariants = async (productId: string) => {
+        const keepIds = new Set<string>();
+        const inserts: any[] = [];
+
+        for (const combo of variantCombinations) {
+            const d = variantData[combo.key] || { price: price, stock: '0', sku: '' };
+            const colorHex = selectedColors.find(c => c.name === combo.color)?.hex || null;
+            const row = {
+                product_id: productId,
+                name: combo.size || combo.color || 'Default',
+                sku: d.sku || null,
+                price: parseFloat(d.price || price) || 0,
+                quantity: parseInt(d.stock) || 0,
+                option1: combo.size || null,
+                option2: combo.color?.trim() || null,
+                metadata: colorHex ? { color_hex: colorHex } : {}
+            };
+            const existingId = existingVariantIdByKey[combo.key];
+            if (existingId) {
+                keepIds.add(existingId);
+                const { error } = await supabase.from('product_variants').update(row).eq('id', existingId);
+                if (error) throw new Error(`Could not update variant "${row.name}": ${error.message}`);
+            } else {
+                inserts.push(row);
+            }
+        }
+
+        if (inserts.length > 0) {
+            const { error } = await supabase.from('product_variants').insert(inserts);
+            if (error) throw new Error(`Could not add variants: ${error.message}`);
+        }
+
+        const toDelete = existingVariants.filter((v: any) => !keepIds.has(v.id));
+        for (const variant of toDelete) {
+            const { error } = await supabase.from('product_variants').delete().eq('id', variant.id);
+            if (error) {
+                const label = [variant.color, variant.size].filter(Boolean).join(' / ') || variant.name;
+                const inUse = /foreign key|violates|referenced|cart/i.test(error.message || '');
+                throw new Error(
+                    inUse
+                        ? `Variant "${label}" is still referenced by customer carts or orders and cannot be removed. Set its stock to 0 instead.`
+                        : `Could not remove variant "${label}": ${error.message}`
+                );
+            }
+        }
+    };
+
     // Variant helpers removed — variants are now auto-generated from selectedColors × selectedSizes
 
     const handleSubmit = async () => {
+        if (!productName.trim()) {
+            setNotice({ type: 'error', text: 'Product name is required.' });
+            setActiveTab('general');
+            return;
+        }
+        if (!(parseFloat(price) > 0)) {
+            setNotice({ type: 'error', text: 'Enter a price greater than 0.' });
+            setActiveTab('pricing');
+            return;
+        }
+
         try {
             setLoading(true);
+            setNotice(null);
 
             // If product has variants, auto-sync main stock = sum of variant stocks
             const hasVariants = variants.length > 0;
@@ -337,64 +488,28 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
             }
 
             if (error) throw error;
+            if (!productId) throw new Error('Product was not saved — no id returned.');
 
-            // Update Images
-            if (productId) {
-                // Strategy: We will just delete all old images/variants and recreate them for simplicity in this MVP.
-                // In a clearer implementation, we would diff them.
+            await syncImages(productId);
+            await syncVariants(productId);
 
-                // 1. Images
-                if (isEditMode) {
-                    await supabase.from('product_images').delete().eq('product_id', productId);
-                }
-                if (images.length > 0) {
-                    const imageInserts = images.map((img, idx) => ({
-                        product_id: productId,
-                        url: img.url,
-                        position: idx,
-                        alt_text: productName
-                    }));
-                    await supabase.from('product_images').insert(imageInserts);
-                }
-
-                // 2. Variants
-                if (isEditMode) {
-                    // Be careful not to delete ALL variants if we want to preserve IDs etc, 
-                    // but for now, full replacement is safer to ensure sync.
-                    // Note: This might break order-item references if they rely on variant_id hard constraints without cascading.
-                    // Our Schema migration has ON DELETE SET NULL for order_items -> variant_id, so this is safe for now (but distinct from "archiving").
-                    await supabase.from('product_variants').delete().eq('product_id', productId);
-                }
-
-                if (variants.length > 0) {
-                    const variantInserts = variants.map(v => {
-                        const colorHex = selectedColors.find(c => c.name === v.color)?.hex || null;
-                        return {
-                            product_id: productId,
-                            name: v.name || v.color || 'Default',
-                            sku: v.sku || null,
-                            price: parseFloat(v.price) || 0,
-                            quantity: parseInt(v.stock) || 0,
-                            option1: v.name || null,
-                            option2: v.color?.trim() || null,
-                            metadata: colorHex ? { color_hex: colorHex } : {}
-                        };
-                    });
-                    const { error: varError } = await supabase.from('product_variants').insert(variantInserts);
-                    if (varError) throw varError;
-                }
-            }
-
-            alert(isEditMode ? 'Product updated successfully!' : 'Product created successfully!');
             router.push('/admin/products');
 
         } catch (err: any) {
             console.error('Error saving product:', err);
-            alert(`Error: ${err.message}`);
+            setNotice({ type: 'error', text: err?.message || 'Could not save the product.' });
         } finally {
             setLoading(false);
         }
     };
+
+    const previewSlug = initialData?.slug;
+    const canPreview = isEditMode && Boolean(previewSlug) && (initialData?.status || '').toLowerCase() === 'active';
+    const previewTooltip = !previewSlug
+        ? 'Save the product to get a preview link'
+        : (initialData?.status || '').toLowerCase() !== 'active'
+            ? 'Only active products are visible in the store'
+            : 'Open the product page in a new tab';
 
     return (
         <div className="space-y-6">
@@ -418,14 +533,26 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
 
                 <div className="flex items-center space-x-3">
                     {isEditMode && (
-                        <Link
-                            href={`/product/${initialData?.id}`}
-                            target="_blank"
-                            className="px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg hover:border-gray-400 transition-colors font-semibold whitespace-nowrap cursor-pointer flex items-center"
-                        >
-                            <i className="ri-eye-line mr-2"></i>
-                            Preview
-                        </Link>
+                        canPreview ? (
+                            <Link
+                                href={`/product/${previewSlug}`}
+                                target="_blank"
+                                title={previewTooltip}
+                                className="px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg hover:border-gray-400 transition-colors font-semibold whitespace-nowrap cursor-pointer flex items-center"
+                            >
+                                <i className="ri-eye-line mr-2"></i>
+                                Preview
+                            </Link>
+                        ) : (
+                            <span
+                                title={previewTooltip}
+                                aria-disabled="true"
+                                className="px-6 py-3 border-2 border-gray-200 text-gray-400 rounded-lg font-semibold whitespace-nowrap cursor-not-allowed flex items-center"
+                            >
+                                <i className="ri-eye-off-line mr-2"></i>
+                                Preview
+                            </span>
+                        )
                     )}
                     <button
                         onClick={handleSubmit}
@@ -446,6 +573,15 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
                     </button>
                 </div>
             </div>
+
+            {notice && (
+                <div className={`rounded-lg p-4 text-sm flex items-start justify-between gap-4 border ${notice.type === 'success' ? 'bg-brand-soft text-brand border-brand/30' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                    <span>{notice.text}</span>
+                    <button onClick={() => setNotice(null)} className="shrink-0 cursor-pointer" aria-label="Dismiss">
+                        <i className="ri-close-line text-lg"></i>
+                    </button>
+                </div>
+            )}
 
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="border-b border-gray-200 overflow-x-auto">
@@ -524,9 +660,9 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
                                         onChange={(e) => setStatus(e.target.value)}
                                         className="w-full px-4 py-3 pr-8 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-brand focus:border-brand cursor-pointer"
                                     >
-                                        <option>Active</option>
-                                        <option>Draft</option>
-                                        <option>Archived</option>
+                                        <option value="active">Active</option>
+                                        <option value="draft">Draft</option>
+                                        <option value="archived">Archived</option>
                                     </select>
                                 </div>
                             </div>
@@ -1069,7 +1205,7 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
                                     <span className="text-sm font-semibold">{uploading ? 'Uploading...' : 'Upload Image'}</span>
                                     <input
                                         type="file"
-                                        accept="image/*"
+                                        accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
                                         className="hidden"
                                         onChange={handleImageUpload}
                                         disabled={uploading}
@@ -1080,7 +1216,7 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
                             <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
                                 <p className="text-sm text-gray-700">
                                     <strong>Image Guidelines:</strong> Use high-quality images (min 1000x1000px), white or neutral backgrounds work best.
-                                    Supported formats: JPG, PNG, WebP (max 5MB each).
+                                    Supported formats: JPEG, PNG, WebP, GIF, AVIF (max 10MB each). Removed images are deleted when you save.
                                 </p>
                             </div>
                         </div>

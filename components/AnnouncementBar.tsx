@@ -72,12 +72,7 @@ export default function AnnouncementBar() {
     const visibleBanners = banners.filter(b => !dismissed.has(b.id));
 
     if (visibleBanners.length === 0) {
-        // Show default banner if no custom banners
-        return (
-            <div className="bg-brand-dark text-white py-2 text-center text-sm">
-                <p>Free Store Pickup Available | Order Online, Pick Up Today</p>
-            </div>
-        );
+        return null;
     }
 
     const currentBanner = visibleBanners[currentIndex % visibleBanners.length];

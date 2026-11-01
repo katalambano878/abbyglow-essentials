@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { supabase } from '@/lib/supabase';
 import { useRecaptcha } from '@/hooks/useRecaptcha';
 
 export default function ForgotPasswordPage() {
@@ -9,36 +10,38 @@ export default function ForgotPasswordPage() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { getToken, verifying } = useRecaptcha();
+  const { getCaptchaToken, verifying } = useRecaptcha();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setIsLoading(true);
 
-    if (!email) {
+    const trimmed = email.trim();
+    if (!trimmed) {
       setError('Email is required');
-      setIsLoading(false);
       return;
     }
-    if (!/\S+@\S+\.\S+/.test(email)) {
+    if (!/\S+@\S+\.\S+/.test(trimmed)) {
       setError('Please enter a valid email');
-      setIsLoading(false);
       return;
     }
 
-    // reCAPTCHA verification
-    const isHuman = await getToken('forgot_password');
-    if (!isHuman) {
-      setError('Security verification failed. Please try again.');
-      setIsLoading(false);
-      return;
-    }
-
-    setTimeout(() => {
-      setIsLoading(false);
+    setIsLoading(true);
+    try {
+      const captchaToken = (await getCaptchaToken('forgot_password')) || undefined;
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(trimmed, {
+        captchaToken,
+      });
+      if (resetError) {
+        setError(resetError.message || 'Could not send the reset link. Please try again.');
+        return;
+      }
       setIsSubmitted(true);
-    }, 1500);
+    } catch (err: any) {
+      setError(err?.message || 'Could not send the reset link. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (isSubmitted) {
@@ -51,10 +54,10 @@ export default function ForgotPasswordPage() {
             </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-3">Check Your Email</h1>
             <p className="text-gray-600 mb-6">
-              We've sent a password reset link to <strong>{email}</strong>
+              If an account exists for that email, we&apos;ve sent a reset link. It expires in 1 hour.
             </p>
             <p className="text-sm text-gray-500 mb-8">
-              If you don't receive an email within a few minutes, please check your spam folder.
+              If you don&apos;t receive an email within a few minutes, please check your spam folder.
             </p>
             <Link
               href="/auth/login"
@@ -79,11 +82,13 @@ export default function ForgotPasswordPage() {
         <div className="bg-white rounded-xl shadow-sm p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label className="block text-sm font-semibold text-gray-900 mb-2">
+              <label htmlFor="forgot-email" className="block text-sm font-semibold text-gray-900 mb-2">
                 Email Address
               </label>
               <input
+                id="forgot-email"
                 type="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className={`w-full px-4 py-3 border-2 rounded-lg focus:ring-2 focus:ring-brand focus:border-brand ${
@@ -92,7 +97,7 @@ export default function ForgotPasswordPage() {
                 placeholder="you@example.com"
               />
               {error && (
-                <p className="text-sm text-red-600 mt-2">{error}</p>
+                <p className="text-sm text-red-600 mt-2" role="alert">{error}</p>
               )}
             </div>
 

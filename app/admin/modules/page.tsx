@@ -106,6 +106,11 @@ export default function ModulesPage() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
+  const [role, setRole] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
+
+  const isAdmin = role === 'admin';
 
   useEffect(() => {
     fetchModuleStates();
@@ -113,104 +118,77 @@ export default function ModulesPage() {
 
   const fetchModuleStates = async () => {
     try {
-      const { data, error } = await supabase.from('store_modules').select('*');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', session.user.id)
+          .maybeSingle();
+        setRole(profile?.role || null);
+      }
+
+      const { data, error } = await supabase.from('store_modules').select('id, enabled');
       if (error) throw error;
 
       if (data) {
         setModules(prev => prev.map(m => {
           const dbState = data.find((d: any) => d.id === m.id);
-          return dbState ? { ...m, enabled: dbState.enabled } : m;
+          return dbState ? { ...m, enabled: Boolean(dbState.enabled) } : m;
         }));
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error fetching modules:', err);
+      setNotice({ type: 'error', text: `Could not load module settings: ${err?.message || 'unknown error'}` });
     } finally {
       setLoading(false);
     }
   };
 
   const toggleModule = async (id: string, currentState: boolean) => {
+    if (!isAdmin) {
+      setNotice({ type: 'error', text: 'Only administrators can enable or disable modules.' });
+      return;
+    }
     const newState = !currentState;
+    setSavingId(id);
+    setNotice(null);
 
     // Optimistic Update
-    setModules(modules.map(m =>
-      m.id === id ? { ...m, enabled: newState } : m
-    ));
+    setModules(prev => prev.map(m => (m.id === id ? { ...m, enabled: newState } : m)));
 
     try {
-      const { error } = await supabase
+      const { data: updated, error } = await supabase
         .from('store_modules')
-        .upsert({ id, enabled: newState, updated_at: new Date().toISOString() });
+        .update({ enabled: newState, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .select('id');
 
-      if (error) {
-        throw error;
+      if (error) throw error;
+
+      if (!updated || updated.length === 0) {
+        // Row does not exist yet for this module — create it.
+        const { error: insertError } = await supabase
+          .from('store_modules')
+          .insert([{ id, enabled: newState, updated_at: new Date().toISOString() }]);
+        if (insertError) throw insertError;
       }
 
-      window.location.reload();
-
-    } catch (err) {
+      // Let the admin layout refresh its menu without a full reload.
+      window.dispatchEvent(new CustomEvent('abbyglow:modules-changed'));
+      const name = modules.find(m => m.id === id)?.name || id;
+      setNotice({ type: 'success', text: `${name} ${newState ? 'enabled' : 'disabled'}.` });
+    } catch (err: any) {
       console.error('Error updating module:', err);
-      alert('Failed to update settings');
+      // Roll back the optimistic change
+      setModules(prev => prev.map(m => (m.id === id ? { ...m, enabled: currentState } : m)));
+      setNotice({ type: 'error', text: `Failed to update settings: ${err?.message || 'unknown error'}` });
+    } finally {
+      setSavingId(null);
     }
   };
 
   const categories = ['all', ...Array.from(new Set(modules.map(m => m.category)))];
-
-  /* Lock Screen Logic */
-  const [isLocked, setIsLocked] = useState(true);
-  const [pin, setPin] = useState('');
-  const [pinError, setPinError] = useState('');
-
-  const handleUnlock = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pin === '6526') {
-      setIsLocked(false);
-    } else {
-      setPinError('Incorrect PIN');
-      setPin('');
-    }
-  };
-
-  if (isLocked) {
-    return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 text-center border border-gray-100">
-          <div className="w-20 h-20 bg-brand-soft rounded-full flex items-center justify-center mx-auto mb-6">
-            <i className="ri-lock-2-line text-4xl text-brand"></i>
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Restricted Access</h2>
-          <p className="text-gray-500 mb-8">Please enter the security PIN to access Modules.</p>
-
-          <form onSubmit={handleUnlock} className="space-y-4">
-            <div>
-              <input
-                type="password"
-                value={pin}
-                onChange={(e) => {
-                  setPin(e.target.value);
-                  setPinError('');
-                }}
-                className="w-full text-center text-3xl font-bold tracking-widest px-4 py-4 border-2 border-gray-200 rounded-xl focus:border-brand focus:ring-4 focus:ring-brand/10 outline-none transition-all"
-                placeholder="• • • •"
-                maxLength={4}
-                autoFocus
-              />
-            </div>
-            {pinError && (
-              <p className="text-red-500 text-sm font-medium animate-pulse">{pinError}</p>
-            )}
-            <button
-              type="submit"
-              className="w-full bg-gray-900 hover:bg-brand-dark text-white font-bold py-4 rounded-xl transition-colors text-lg"
-            >
-              Unlock Dashboard
-            </button>
-          </form>
-
-        </div>
-      </div>
-    );
-  }
 
   const filteredModules = modules.filter(module => {
     const matchesSearch = module.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -232,6 +210,22 @@ export default function ModulesPage() {
       <div className="max-w-7xl mx-auto">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Modules & Features</h1>
         <p className="text-gray-600 mb-8">Enable or disable features to customize your admin dashboard.</p>
+
+        {notice && (
+          <div className={`mb-6 rounded-lg p-4 text-sm flex items-start justify-between gap-4 border ${notice.type === 'success' ? 'bg-brand-soft text-brand border-brand/30' : 'bg-red-50 text-red-700 border-red-200'}`}>
+            <span>{notice.text}</span>
+            <button onClick={() => setNotice(null)} className="shrink-0 cursor-pointer" aria-label="Dismiss">
+              <i className="ri-close-line text-lg"></i>
+            </button>
+          </div>
+        )}
+
+        {!loading && !isAdmin && (
+          <div className="mb-6 rounded-lg p-4 text-sm bg-amber-50 border border-amber-200 text-amber-800 flex items-center">
+            <i className="ri-lock-2-line mr-2 text-lg"></i>
+            You are signed in as {role || 'staff'}. Only administrators can change module settings.
+          </div>
+        )}
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
           <div className="flex gap-4">
@@ -271,7 +265,10 @@ export default function ModulesPage() {
                         </div>
                         <button
                           onClick={() => toggleModule(module.id, module.enabled)}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${module.enabled ? 'bg-brand' : 'bg-gray-300'}`}
+                          disabled={!isAdmin || savingId === module.id}
+                          title={isAdmin ? (module.enabled ? 'Disable' : 'Enable') : 'Admin only'}
+                          aria-pressed={module.enabled}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${module.enabled ? 'bg-brand' : 'bg-gray-300'} ${!isAdmin ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                         >
                           <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${module.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
                         </button>

@@ -3,17 +3,20 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { cachedQuery } from '@/lib/query-cache';
 import ProductCard from '@/components/ProductCard';
 import ProductReviews from '@/components/ProductReviews';
 import { StructuredData, generateProductSchema, generateBreadcrumbSchema } from '@/components/SEOHead';
-import { notFound } from 'next/navigation';
 import { useCart } from '@/context/CartContext';
+import { useWishlist } from '@/context/WishlistContext';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { getPreorderShippingNote, isPreorderProduct } from '@/lib/preorder';
 import { displayCompareAtPrice, displayDiscountPercent } from '@/lib/storefront-pricing';
 import { isAppStorageUrl } from '@/lib/image-utils';
+
+const PLACEHOLDER_IMAGE = '/images/placeholder-product.svg';
 
 // Map common color names to hex values for the swatch preview
 function colorNameToHex(name: string): string {
@@ -40,10 +43,11 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
   const [selectedSize, setSelectedSize] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [activeTab, setActiveTab] = useState('description');
-  const [isWishlisted, setIsWishlisted] = useState(false);
   const [relatedProducts, setRelatedProducts] = useState<any[]>([]);
 
+  const router = useRouter();
   const { addToCart } = useCart();
+  const { addToWishlist, removeFromWishlist, isInWishlist } = useWishlist();
 
   useEffect(() => {
     async function fetchProduct() {
@@ -57,10 +61,11 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
               .from('products')
               .select(`
                 *,
-                categories(name),
+                categories(name, slug),
                 product_variants(*),
                 product_images(url, position, alt_text)
-              `);
+              `)
+              .eq('status', 'active');
 
             const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slug);
 
@@ -99,28 +104,37 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
           }
         });
 
+        const meta = (productData.metadata && typeof productData.metadata === 'object') ? productData.metadata : {};
+        const metaFeatures: string[] = Array.isArray(meta.features)
+          ? meta.features.map((f: unknown) => String(f).trim()).filter(Boolean)
+          : typeof meta.features === 'string' && meta.features.trim()
+            ? meta.features.split(/\r?\n/).map((f: string) => f.trim()).filter(Boolean)
+            : [];
+        const metaCare: string = typeof meta.care === 'string' ? meta.care.trim() : '';
+        const categoryRow = Array.isArray(productData.categories) ? productData.categories[0] : productData.categories;
+
         const transformedProduct = {
           ...productData,
           images: productData.product_images?.sort((a: any, b: any) => a.position - b.position).map((img: any) => img.url) || [],
-          category: productData.categories?.name || 'Shop',
-          rating: productData.rating_avg || 0,
-          reviewCount: 0,
-          stockCount: productData.quantity,
+          category: categoryRow?.name || 'Shop',
+          categorySlug: categoryRow?.slug || '',
+          rating: Number(productData.rating_avg) || 0,
+          reviewCount: Number(productData.review_count) || 0,
+          stockCount: Number(productData.quantity) || 0,
           moq: productData.moq || 1,
           colors: [...new Set(rawVariants.map((v: any) => v.color).filter(Boolean))],
           colorHexMap,
           variants: rawVariants,
           sizes: rawVariants.map((v: any) => v.name) || [],
-          features: ['Premium Quality', 'Authentic Design'],
-          featured: ['Premium Quality', 'Authentic Design'],
-          care: 'Handle with care.',
+          features: metaFeatures,
+          care: metaCare,
           preorderShipping: getPreorderShippingNote(productData.metadata),
           isPreorder: isPreorderProduct(productData.metadata),
         };
 
         // Ensure at least one image/placeholder
         if (transformedProduct.images.length === 0) {
-          transformedProduct.images = ['https://via.placeholder.com/800x800?text=No+Image'];
+          transformedProduct.images = [PLACEHOLDER_IMAGE];
         }
 
         setProduct(transformedProduct);
@@ -143,6 +157,7 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
             (() => supabase
               .from('products')
               .select('*, product_images(url, position), product_variants(id, name, price, quantity)')
+              .eq('status', 'active')
               .eq('category_id', productData.category_id)
               .neq('id', productData.id)
               .limit(4)) as any,
@@ -161,10 +176,10 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
                 slug: p.slug,
                 name: p.name,
                 price: p.price,
-                image: p.product_images?.[0]?.url || 'https://via.placeholder.com/800?text=No+Image',
-                rating: p.rating_avg || 0,
-                reviewCount: 0,
-                inStock: effectiveStock > 0,
+                image: p.product_images?.[0]?.url || PLACEHOLDER_IMAGE,
+                rating: Number(p.rating_avg) || 0,
+                reviewCount: Number(p.review_count) || 0,
+                inStock: effectiveStock > 0 || isPreorderProduct(p.metadata),
                 maxStock: effectiveStock || 50,
                 moq: p.moq || 1,
                 hasVariants,
@@ -194,7 +209,37 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
 
   // Determine the active price: variant price if selected, otherwise base price
   const activePrice = selectedVariant?.price ?? product?.price ?? 0;
-  const activeStock = selectedVariant ? (selectedVariant.stock ?? selectedVariant.quantity ?? product?.stockCount ?? 0) : (product?.stockCount ?? 0);
+  const rawStock: number = selectedVariant
+    ? Number(selectedVariant.stock ?? selectedVariant.quantity ?? product?.stockCount ?? 0)
+    : Number(product?.stockCount ?? 0);
+  // Pre-order products skip the stock check at checkout, so they stay orderable at zero stock.
+  const PREORDER_ALLOWANCE = 99;
+  const isPreorderOnly = Boolean(product?.isPreorder) && rawStock <= 0;
+  const activeStock = isPreorderOnly ? PREORDER_ALLOWANCE : rawStock;
+  const anyVariantInStock = Boolean(product?.variants?.some((v: any) => Number(v.stock ?? v.quantity ?? 0) > 0));
+  const isAvailable = Boolean(product) && (
+    Number(product?.stockCount ?? 0) > 0 || anyVariantInStock || Boolean(product?.isPreorder)
+  );
+  const isWishlisted = product ? isInWishlist(product.id) : false;
+
+  const toggleWishlist = () => {
+    if (!product) return;
+    if (isWishlisted) {
+      removeFromWishlist(product.id);
+      return;
+    }
+    addToWishlist({
+      id: product.id,
+      name: product.name,
+      price: activePrice,
+      originalPrice: product.compare_at_price ? Number(product.compare_at_price) : undefined,
+      image: product.images[0],
+      rating: product.rating,
+      reviewCount: product.reviewCount,
+      inStock: isAvailable,
+      slug: product.slug,
+    });
+  };
 
   const handleAddToCart = () => {
     if (!product) return;
@@ -219,6 +264,7 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
       image: product.images[0],
       quantity: quantity,
       variant: variantLabel,
+      variantId: selectedVariant?.id ?? null,
       slug: product.slug,
       maxStock: activeStock,
       moq: product.moq || 1,
@@ -228,7 +274,7 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
 
   const handleBuyNow = () => {
     handleAddToCart();
-    window.location.href = '/checkout';
+    router.push('/checkout');
   };
 
   if (loading) {
@@ -266,7 +312,7 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
     sku: product.sku,
     rating: product.rating,
     reviewCount: product.reviewCount,
-    availability: product.quantity > 0 ? 'in_stock' : 'out_of_stock',
+    availability: isAvailable ? 'in_stock' : 'out_of_stock',
     category: product.category
   });
 
@@ -274,7 +320,7 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
   const breadcrumbSchema = generateBreadcrumbSchema([
     { name: 'Home', url: baseUrl },
     { name: 'Shop', url: `${baseUrl}/shop` },
-    { name: product.category, url: `${baseUrl}/shop?category=${product.category.toLowerCase().replace(/\s+/g, '-')}` },
+    { name: product.category, url: product.categorySlug ? `${baseUrl}/shop?category=${product.categorySlug}` : `${baseUrl}/shop` },
     { name: product.name, url: `${baseUrl}/product/${slug}` }
   ]);
 
@@ -291,7 +337,7 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
               <i className="ri-arrow-right-s-line text-gray-400"></i>
               <Link href="/shop" className="text-gray-600 hover:text-brand transition-colors">Shop</Link>
               <i className="ri-arrow-right-s-line text-gray-400"></i>
-              <Link href="#" className="text-gray-600 hover:text-brand transition-colors">{product.category}</Link>
+              <Link href={product.categorySlug ? `/shop?category=${encodeURIComponent(product.categorySlug)}` : '/shop'} className="text-gray-600 hover:text-brand transition-colors">{product.category}</Link>
               <i className="ri-arrow-right-s-line text-gray-400"></i>
               <span className="text-gray-900 font-medium truncate max-w-[200px]">{product.name}</span>
             </nav>
@@ -350,7 +396,10 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
                   <div className="flex items-start justify-between mb-3">
                     <p className="text-[11px] tracking-[0.2em] text-gray-500 uppercase font-bold">{product.category}</p>
                     <button
-                      onClick={() => setIsWishlisted(!isWishlisted)}
+                      type="button"
+                      aria-label={isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
+                      aria-pressed={isWishlisted}
+                      onClick={toggleWishlist}
                       className="group w-10 h-10 flex items-center justify-center bg-white border border-black/[0.04] hover:border-black/[0.08] rounded-full transition-all duration-300 cursor-pointer shadow-sm hover:shadow-md"
                     >
                       <i className={`${isWishlisted ? 'ri-heart-fill text-red-500 scale-110' : 'ri-heart-line text-gray-400 group-hover:text-gray-600'} text-lg transition-all`}></i>
@@ -366,15 +415,23 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
                 </div>
 
                 <div className="flex items-center mb-7">
-                  <div className="flex items-center space-x-0.5 mr-3">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <i
-                        key={star}
-                        className={`${star <= Math.round(product.rating) ? 'ri-star-fill text-gray-900' : 'ri-star-line text-gray-200'} text-[17px]`}
-                      ></i>
-                    ))}
-                  </div>
-                  <span className="text-gray-500 text-sm font-medium">{Number(product.rating).toFixed(1)}</span>
+                  {product.reviewCount > 0 ? (
+                    <>
+                      <div className="flex items-center space-x-0.5 mr-3">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <i
+                            key={star}
+                            className={`${star <= Math.round(product.rating) ? 'ri-star-fill text-gray-900' : 'ri-star-line text-gray-200'} text-[17px]`}
+                          ></i>
+                        ))}
+                      </div>
+                      <span className="text-gray-500 text-sm font-medium">
+                        {Number(product.rating).toFixed(1)} · {product.reviewCount} {product.reviewCount === 1 ? 'review' : 'reviews'}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-gray-400 text-sm font-medium">No reviews yet</span>
+                  )}
                 </div>
 
                 <div className="flex items-baseline space-x-3 mb-8">
@@ -390,7 +447,7 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
                   )}
                 </div>
 
-                <p className="text-gray-500 leading-[1.8] mb-10 text-[15.5px] font-light max-w-[95%]">{product.description}</p>
+                <p className="text-gray-500 leading-[1.8] mb-10 text-[15.5px] font-light max-w-[95%] whitespace-pre-line">{product.description}</p>
 
                 {/* Color Selector */}
                 {hasVariants && product.colors.length > 0 && (
@@ -578,7 +635,13 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
                           Min. order: {product.moq} units
                         </span>
                       )}
-                      {activeStock > 10 && (
+                      {isPreorderOnly && (
+                        <span className="text-gray-500 font-medium text-xs flex items-center tracking-wide">
+                          <span className="w-1.5 h-1.5 rounded-full bg-brand-accent mr-2"></span>
+                          Available for pre-order
+                        </span>
+                      )}
+                      {!isPreorderOnly && activeStock > 10 && (
                         <span className="text-gray-500 font-medium text-xs flex items-center tracking-wide">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-2 shadow-[0_0_8px_rgba(52,211,153,0.5)] animate-pulse"></span>
                           {activeStock} in stock
@@ -649,7 +712,12 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
           <div className="max-w-7xl mx-auto px-4 sm:px-6">
             <div className="border-b border-gray-300 mb-8">
               <div className="flex space-x-4 sm:space-x-8 overflow-x-auto">
-                {['description', 'features', 'care', 'reviews'].map((tab) => (
+                {[
+                  'description',
+                  ...(product.features.length > 0 ? ['features'] : []),
+                  ...(product.care ? ['care'] : []),
+                  'reviews',
+                ].map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -666,11 +734,11 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
 
             {activeTab === 'description' && (
               <div className="prose max-w-none">
-                <p className="text-gray-700 text-lg leading-relaxed">{product.description}</p>
+                <p className="text-gray-700 text-lg leading-relaxed whitespace-pre-line">{product.description}</p>
               </div>
             )}
 
-            {activeTab === 'features' && (
+            {activeTab === 'features' && product.features.length > 0 && (
               <div>
                 <h3 className="text-2xl font-bold text-gray-900 mb-6">Key Features</h3>
                 <ul className="grid md:grid-cols-2 gap-4">
@@ -684,10 +752,10 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
               </div>
             )}
 
-            {activeTab === 'care' && (
+            {activeTab === 'care' && product.care && (
               <div>
                 <h3 className="text-2xl font-bold text-gray-900 mb-6">Care Instructions</h3>
-                <p className="text-gray-700 text-lg leading-relaxed">{product.care}</p>
+                <p className="text-gray-700 text-lg leading-relaxed whitespace-pre-line">{product.care}</p>
               </div>
             )}
 

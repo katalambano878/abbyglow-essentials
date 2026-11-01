@@ -14,8 +14,27 @@ interface Review {
   verified: boolean;
   title: string;
   content: string;
-  helpful: number;
   user_id: string;
+}
+
+const HELPFUL_STORAGE_KEY = 'abbyglow_helpful_reviews';
+
+function readHelpful(): string[] {
+  try {
+    const raw = localStorage.getItem(HELPFUL_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeHelpful(ids: string[]) {
+  try {
+    localStorage.setItem(HELPFUL_STORAGE_KEY, JSON.stringify(ids));
+  } catch {
+    /* storage unavailable */
+  }
 }
 
 interface ProductReviewsProps {
@@ -29,6 +48,8 @@ export default function ProductReviews({ productId }: ProductReviewsProps) {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [helpfulIds, setHelpfulIds] = useState<string[]>([]);
 
   const [reviewForm, setReviewForm] = useState({
     rating: 5,
@@ -44,8 +65,17 @@ export default function ProductReviews({ productId }: ProductReviewsProps) {
       setUser(session?.user || null);
     });
 
+    setHelpfulIds(readHelpful());
     fetchReviews();
   }, [productId]);
+
+  const toggleHelpful = (reviewId: string) => {
+    setHelpfulIds((prev) => {
+      const next = prev.includes(reviewId) ? prev.filter((id) => id !== reviewId) : [...prev, reviewId];
+      writeHelpful(next);
+      return next;
+    });
+  };
 
   const fetchReviews = async () => {
     try {
@@ -64,19 +94,16 @@ export default function ProductReviews({ productId }: ProductReviewsProps) {
       if (error) throw error;
 
       if (data) {
-        // We need to fetch user names if possible. Since we don't have public profiles easily accessible 
-        // without complicated RLS/joins in client, we might fallback to generic name or metadata if stored.
-        // For this demo, we'll try to use a "clean" name or just "Verified Customer"
-
+        // Reviewer profiles are not readable from the browser, so authors are
+        // labelled by purchase verification only.
         const formattedReviews = data.map((r: any) => ({
           id: r.id,
-          author: 'Verified Customer', // or fetch from profiles if we had it joined
-          rating: r.rating,
+          author: r.verified_purchase ? 'Verified purchase' : 'Customer',
+          rating: Number(r.rating) || 0,
           date: r.created_at,
-          verified: r.verified_purchase,
-          title: r.title,
-          content: r.content,
-          helpful: r.helpful_votes || 0,
+          verified: Boolean(r.verified_purchase),
+          title: r.title || '',
+          content: r.content || '',
           user_id: r.user_id
         }));
         setReviews(formattedReviews);
@@ -107,42 +134,39 @@ export default function ProductReviews({ productId }: ProductReviewsProps) {
 
   const handleSubmitReview = async (e: React.FormEvent) => {
     e.preventDefault();
+    setNotice(null);
     if (!user) {
-      alert('Please login to submit a review');
+      setNotice({ type: 'error', text: 'Please log in to submit a review.' });
       return;
     }
 
     // reCAPTCHA verification
     const isHuman = await getToken('review');
     if (!isHuman) {
-      alert('Security verification failed. Please try again.');
+      setNotice({ type: 'error', text: 'Security verification failed. Please try again.' });
       return;
     }
 
     setIsSubmitting(true);
 
     try {
+      // status is forced to 'pending' and verified_purchase is computed server-side.
       const { error } = await supabase.from('reviews').insert([{
         product_id: productId,
-        user_id: user.id,
         rating: reviewForm.rating,
-        title: reviewForm.title,
-        content: reviewForm.content,
-        status: 'approved', // Auto-approve for demo
-        verified_purchase: false // We could check orders here but keeping it simple
+        title: reviewForm.title.trim(),
+        content: reviewForm.content.trim(),
       }]);
 
       if (error) throw error;
 
-      alert('Review submitted successfully!');
+      setNotice({ type: 'success', text: "Thanks! Your review will appear once it's approved." });
       setShowReviewForm(false);
       setReviewForm({ rating: 5, title: '', content: '' });
-      invalidateCache(`reviews:${productId}`); // Clear cache so fresh data is fetched
-      fetchReviews(); // Refresh list
-
+      invalidateCache(`reviews:${productId}`);
     } catch (err: any) {
       console.error('Submit review error:', err);
-      alert('Failed to submit review: ' + err.message);
+      setNotice({ type: 'error', text: `Failed to submit review: ${err?.message || 'please try again.'}` });
     } finally {
       setIsSubmitting(false);
     }
@@ -153,6 +177,13 @@ export default function ProductReviews({ productId }: ProductReviewsProps) {
   return (
     <div className="bg-white rounded-xl shadow-sm p-8">
       <h2 className="text-2xl font-bold text-gray-900 mb-6">Customer Reviews</h2>
+
+      {notice && (
+        <div className={`mb-6 p-4 rounded-lg border text-sm flex items-start gap-2 ${notice.type === 'success' ? 'bg-brand-soft border-brand/30 text-brand-ink' : 'bg-red-50 border-red-200 text-red-700'}`}>
+          <i className={`${notice.type === 'success' ? 'ri-checkbox-circle-line' : 'ri-error-warning-line'} mt-0.5`}></i>
+          <span>{notice.text}</span>
+        </div>
+      )}
 
       {reviews.length === 0 && !showReviewForm ? (
         <div className="text-center py-8 mb-8 border-b border-gray-200">
@@ -256,7 +287,8 @@ export default function ProductReviews({ productId }: ProductReviewsProps) {
 
           {!user && (
             <div className="mb-4 p-4 bg-amber-50 text-amber-800 rounded-lg">
-              You must be logged in to submit a review.
+              You must be logged in to submit a review.{' '}
+              <a href="/auth/login" className="underline font-semibold">Log in</a>
             </div>
           )}
 
@@ -319,7 +351,7 @@ export default function ProductReviews({ productId }: ProductReviewsProps) {
                     {review.verified && (
                       <span className="flex items-center text-xs text-brand bg-brand-soft px-2 py-1 rounded">
                         <i className="ri-checkbox-circle-fill mr-1"></i>
-                        Verified Must Have
+                        Verified purchase
                       </span>
                     )}
                   </div>
@@ -342,9 +374,14 @@ export default function ProductReviews({ productId }: ProductReviewsProps) {
             <p className="text-gray-700 mb-4">{review.content}</p>
 
             <div className="flex items-center space-x-4 text-sm">
-              <button className="flex items-center space-x-1 text-gray-600 hover:text-brand transition-colors">
-                <i className="ri-thumb-up-line"></i>
-                <span>Helpful ({review.helpful})</span>
+              <button
+                type="button"
+                onClick={() => toggleHelpful(review.id)}
+                aria-pressed={helpfulIds.includes(review.id)}
+                className={`flex items-center space-x-1 transition-colors ${helpfulIds.includes(review.id) ? 'text-brand font-semibold' : 'text-gray-600 hover:text-brand'}`}
+              >
+                <i className={helpfulIds.includes(review.id) ? 'ri-thumb-up-fill' : 'ri-thumb-up-line'}></i>
+                <span>{helpfulIds.includes(review.id) ? 'Marked helpful' : 'Helpful'}</span>
               </button>
             </div>
           </div>

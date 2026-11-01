@@ -1,32 +1,50 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useRecaptcha } from '@/hooks/useRecaptcha';
 
-export default function LoginPage() {
+/** Only allow same-origin, absolute paths (never protocol-relative "//evil"). */
+function safeNext(raw: string | null): string {
+  if (!raw) return '/account';
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return '/account';
+  return raw;
+}
+
+function LoginContent() {
   const router = useRouter();
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-    rememberMe: false
-  });
+  const searchParams = useSearchParams();
+  const nextPath = safeNext(searchParams.get('next') ?? searchParams.get('redirect'));
+  const reason = searchParams.get('reason');
+
+  const [formData, setFormData] = useState({ email: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
-  const [errors, setErrors] = useState<any>({});
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const [isLoading, setIsLoading] = useState(false);
   const [authError, setAuthError] = useState('');
-  const { getToken, verifying } = useRecaptcha();
+  const { getCaptchaToken, verifying } = useRecaptcha();
+
+  // Already signed in → go where they were headed.
+  useEffect(() => {
+    let cancelled = false;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!cancelled && data.session) {
+        router.replace(nextPath);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [router, nextPath]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({});
     setAuthError('');
-    setIsLoading(true);
 
-    // Validation
-    const newErrors: any = {};
+    const newErrors: { email?: string; password?: string } = {};
     if (!formData.email) {
       newErrors.email = 'Email is required';
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
@@ -35,25 +53,18 @@ export default function LoginPage() {
     if (!formData.password) {
       newErrors.password = 'Password is required';
     }
-
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
-      setIsLoading(false);
       return;
     }
 
-    // reCAPTCHA verification
-    const isHuman = await getToken('login');
-    if (!isHuman) {
-      setAuthError('Security verification failed. Please try again.');
-      setIsLoading(false);
-      return;
-    }
-
+    setIsLoading(true);
     try {
+      const captchaToken = (await getCaptchaToken('login')) || undefined;
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: formData.email,
+        email: formData.email.trim(),
         password: formData.password,
+        options: { captchaToken },
       });
 
       if (error) {
@@ -61,8 +72,10 @@ export default function LoginPage() {
       }
 
       if (data.session) {
-        router.push('/account');
+        router.push(nextPath);
         router.refresh(); // Refresh to update auth state in other components
+      } else {
+        setAuthError('Sign in did not return a session. Please try again.');
       }
     } catch (error: any) {
       console.error('Login error:', error);
@@ -93,8 +106,15 @@ export default function LoginPage() {
           {/* Very faint inner highlight */}
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white to-transparent opacity-80"></div>
 
+          {reason === 'timeout' && !authError && (
+            <div className="mb-6 p-4 bg-amber-50/80 backdrop-blur-sm border border-amber-100 text-amber-700 rounded-2xl text-[13px] font-medium flex items-center">
+              <i className="ri-time-line mr-2 text-lg"></i>
+              You were signed out after a period of inactivity.
+            </div>
+          )}
+
           {authError && (
-            <div className="mb-6 p-4 bg-red-50/80 backdrop-blur-sm border border-red-100 text-red-600 rounded-2xl text-[13px] font-medium flex items-center">
+            <div className="mb-6 p-4 bg-red-50/80 backdrop-blur-sm border border-red-100 text-red-600 rounded-2xl text-[13px] font-medium flex items-center" role="alert">
               <i className="ri-error-warning-fill mr-2 text-lg"></i>
               {authError}
             </div>
@@ -102,11 +122,13 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
-              <label className="block text-[12px] uppercase tracking-wider font-semibold text-gray-500 pl-1">
+              <label htmlFor="login-email" className="block text-[12px] uppercase tracking-wider font-semibold text-gray-500 pl-1">
                 Email Address
               </label>
               <input
+                id="login-email"
                 type="email"
+                autoComplete="email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 className={`w-full px-5 py-3.5 bg-gray-50/50 border rounded-2xl focus:bg-white focus:shadow-[0_8px_30px_rgba(0,0,0,0.04)] focus:ring-0 transition-all duration-300 outline-none text-[15px] text-gray-800 placeholder:text-gray-400 ${errors.email ? 'border-red-300 focus:border-red-400' : 'border-gray-100 focus:border-gray-300'
@@ -119,12 +141,14 @@ export default function LoginPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="block text-[12px] uppercase tracking-wider font-semibold text-gray-500 pl-1">
+              <label htmlFor="login-password" className="block text-[12px] uppercase tracking-wider font-semibold text-gray-500 pl-1">
                 Password
               </label>
               <div className="relative">
                 <input
+                  id="login-password"
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className={`w-full px-5 py-3.5 pr-12 bg-gray-50/50 border rounded-2xl focus:bg-white focus:shadow-[0_8px_30px_rgba(0,0,0,0.04)] focus:ring-0 transition-all duration-300 outline-none text-[15px] text-gray-800 placeholder:text-gray-400 ${errors.password ? 'border-red-300 focus:border-red-400' : 'border-gray-100 focus:border-gray-300'
@@ -135,6 +159,7 @@ export default function LoginPage() {
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-800 transition-colors duration-200"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
                   <i className={`${showPassword ? 'ri-eye-off-line' : 'ri-eye-line'} text-lg`}></i>
                 </button>
@@ -144,19 +169,7 @@ export default function LoginPage() {
               )}
             </div>
 
-            <div className="flex items-center justify-between pt-1 pb-2">
-              <label className="flex items-center group cursor-pointer">
-                <div className="relative flex items-center justify-center w-4 h-4 mr-2">
-                  <input
-                    type="checkbox"
-                    checked={formData.rememberMe}
-                    onChange={(e) => setFormData({ ...formData, rememberMe: e.target.checked })}
-                    className="peer appearance-none w-4 h-4 border border-gray-300 rounded checked:bg-gray-900 checked:border-gray-900 transition-colors duration-200 cursor-pointer"
-                  />
-                  <i className="ri-check-line absolute text-white text-[11px] opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity duration-200"></i>
-                </div>
-                <span className="text-[14px] text-gray-600 group-hover:text-gray-900 transition-colors">Remember me</span>
-              </label>
+            <div className="flex items-center justify-end pt-1 pb-2">
               <Link href="/auth/forgot-password" className="text-[14px] text-gray-500 hover:text-gray-900 font-medium transition-colors border-b border-transparent hover:border-gray-900">
                 Forgot password?
               </Link>
@@ -179,38 +192,10 @@ export default function LoginPage() {
               </span>
             </button>
           </form>
-
-          <div className="mt-8">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-100"></div>
-              </div>
-              <div className="relative flex justify-center text-[12px] uppercase tracking-widest font-semibold">
-                <span className="px-4 bg-white text-gray-400">Or Continue With</span>
-              </div>
-            </div>
-
-            <div className="mt-6 grid grid-cols-2 gap-4">
-              <button
-                disabled
-                className="flex items-center justify-center space-x-2 border border-gray-100 bg-gray-50/50 py-3.5 rounded-2xl cursor-not-allowed transition-all"
-              >
-                <i className="ri-google-fill text-lg text-gray-400"></i>
-                <span className="font-medium text-[14px] text-gray-400">Google</span>
-              </button>
-              <button
-                disabled
-                className="flex items-center justify-center space-x-2 border border-gray-100 bg-gray-50/50 py-3.5 rounded-2xl cursor-not-allowed transition-all"
-              >
-                <i className="ri-facebook-fill text-lg text-gray-400"></i>
-                <span className="font-medium text-[14px] text-gray-400">Facebook</span>
-              </button>
-            </div>
-          </div>
         </div>
 
         <p className="mt-8 text-center text-[15px] text-gray-500 font-light">
-          Don't have an account?{' '}
+          Don&apos;t have an account?{' '}
           <Link href="/auth/signup" className="text-gray-900 font-medium hover:underline underline-offset-4 decoration-gray-300 transition-all">
             Create one now
           </Link>
@@ -226,5 +211,19 @@ export default function LoginPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-[#FDFDFD] flex items-center justify-center">
+          <i className="ri-loader-4-line animate-spin text-3xl text-gray-400"></i>
+        </main>
+      }
+    >
+      <LoginContent />
+    </Suspense>
   );
 }

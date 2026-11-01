@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin as supabase } from '@/lib/supabase-admin';
+
+export const dynamic = 'force-dynamic';
 // Simple in-memory cache
 let cache: { data: any; timestamp: number } | null = null;
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes — categories rarely change
@@ -38,6 +40,6 @@ export async function GET() {
         });
     } catch (err: any) {
         console.error('[Storefront API] Error:', err);
-        return NextResponse.json({ error: err.message }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to fetch categories' }, { status: 500 });
     }
 }

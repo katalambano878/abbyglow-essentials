@@ -2,25 +2,35 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
+
+const PLACEHOLDER_IMAGE = '/images/placeholder-product.svg';
+const ORDER_REF_RE = /^(ORD|SLI)-[A-Z0-9-]+$/;
+
+const money = (value: unknown) => `GH₵ ${Number(value || 0).toFixed(2)}`;
 
 function OrderTrackingContent() {
   const searchParams = useSearchParams();
-  const urlOrderNumber = searchParams.get('order') || '';
-  
-  const [orderNumber, setOrderNumber] = useState(urlOrderNumber);
+  const urlOrderNumber = (searchParams.get('order') || '').trim().toUpperCase();
+
+  const [orderNumber, setOrderNumber] = useState('');
   const [email, setEmail] = useState('');
   const [isTracking, setIsTracking] = useState(false);
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const urlFilled = useRef(false);
 
-  // Auto-track if order number AND email are in the URL
-  const urlEmail = searchParams.get('email') || '';
+  // Pre-fill the order number from the URL once; the email is always typed by the customer.
+  useEffect(() => {
+    if (urlFilled.current) return;
+    urlFilled.current = true;
+    if (urlOrderNumber) setOrderNumber(urlOrderNumber);
+  }, [urlOrderNumber]);
 
   const fetchOrder = useCallback(async (orderNum: string, verifyEmail?: string) => {
-    const emailToVerify = verifyEmail || email;
+    const emailToVerify = (verifyEmail || email).trim().toLowerCase();
 
     // SECURITY: Email is required for order tracking to prevent unauthorized access
     if (!emailToVerify) {
@@ -59,28 +69,27 @@ function OrderTrackingContent() {
     }
   }, [email]);
 
-  useEffect(() => {
-    if (urlOrderNumber && urlEmail) {
-      setEmail(urlEmail);
-      fetchOrder(urlOrderNumber, urlEmail);
-    }
-  }, [urlOrderNumber, urlEmail, fetchOrder]);
-
   const handleTrack = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (!orderNumber) {
+    const ref = orderNumber.trim().toUpperCase();
+    if (!ref) {
       setError('Please enter your order number');
       return;
     }
+    if (!ORDER_REF_RE.test(ref)) {
+      setError('Enter an order number (ORD-…) or a tracking number (SLI-…).');
+      return;
+    }
 
-    if (!email) {
+    if (!email.trim()) {
       setError('Please enter your email address for verification');
       return;
     }
 
-    fetchOrder(orderNumber, email);
+    setOrderNumber(ref);
+    fetchOrder(ref, email);
   };
 
   // Build tracking timeline from real order data
@@ -91,7 +100,18 @@ function OrderTrackingContent() {
     const paymentStatus = order.payment_status || 'pending';
 
     const statusOrder = ['pending', 'processing', 'shipped', 'delivered'];
-    const currentIndex = statusOrder.indexOf(status);
+    const currentIndex = statusOrder.indexOf(status === 'awaiting_payment' ? 'pending' : status);
+    const paymentDone = paymentStatus === 'paid' || paymentStatus === 'partially_paid';
+    const paymentDescription =
+      paymentStatus === 'paid'
+        ? 'Payment confirmed'
+        : paymentStatus === 'partially_paid'
+          ? 'Deposit received — balance due'
+          : paymentStatus === 'failed'
+            ? 'Payment failed — try again'
+            : paymentStatus === 'refunded' || paymentStatus === 'partially_refunded'
+              ? 'Refunded'
+              : 'Awaiting payment';
 
     const steps = [
       {
@@ -105,14 +125,14 @@ function OrderTrackingContent() {
       {
         key: 'payment',
         title: 'Payment',
-        description: paymentStatus === 'paid' ? 'Payment confirmed' : 'Awaiting payment',
-        date: paymentStatus === 'paid' 
-          ? (order.metadata?.payment_verified_at 
+        description: paymentDescription,
+        date: paymentDone
+          ? (order.metadata?.payment_verified_at
             ? new Date(order.metadata.payment_verified_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
             : 'Confirmed')
           : 'Pending',
         icon: 'ri-bank-card-line',
-        status: paymentStatus === 'paid' ? 'completed' as const : 'pending' as const
+        status: paymentDone ? 'completed' as const : 'pending' as const
       },
       {
         key: 'processing',
@@ -120,7 +140,7 @@ function OrderTrackingContent() {
         description: 'Your order is being prepared',
         date: currentIndex >= 1 ? 'In progress' : 'Pending',
         icon: 'ri-box-3-line',
-        status: currentIndex >= 1 ? 'completed' as const : currentIndex === 0 && paymentStatus === 'paid' ? 'active' as const : 'pending' as const
+        status: currentIndex >= 1 ? 'completed' as const : currentIndex === 0 && paymentDone ? 'active' as const : 'pending' as const
       },
       {
         key: 'shipped',
@@ -148,13 +168,28 @@ function OrderTrackingContent() {
     
     const statusMap: Record<string, { label: string; color: string }> = {
       'pending': { label: 'Pending', color: 'bg-amber-100 text-amber-800' },
+      'awaiting_payment': { label: 'Awaiting payment', color: 'bg-amber-100 text-amber-800' },
       'processing': { label: 'Processing', color: 'bg-brand-soft text-brand' },
       'shipped': { label: 'Packaged', color: 'bg-purple-100 text-purple-800' },
       'delivered': { label: 'Delivered', color: 'bg-brand-soft text-brand' },
-      'cancelled': { label: 'Cancelled', color: 'bg-red-100 text-red-800' }
+      'cancelled': { label: 'Cancelled', color: 'bg-red-100 text-red-800' },
+      'refunded': { label: 'Refunded', color: 'bg-gray-200 text-gray-800' }
     };
 
     return statusMap[order.status] || { label: order.status, color: 'bg-gray-100 text-gray-800' };
+  };
+
+  const getPaymentBadge = () => {
+    if (!order) return null;
+    const map: Record<string, { label: string; color: string }> = {
+      'pending': { label: 'Awaiting payment', color: 'bg-amber-50 text-amber-800 border-amber-200' },
+      'paid': { label: 'Paid', color: 'bg-brand-soft text-brand border-brand/20' },
+      'partially_paid': { label: 'Partially paid', color: 'bg-brand-soft text-brand border-brand/20' },
+      'failed': { label: 'Payment failed', color: 'bg-red-50 text-red-700 border-red-200' },
+      'refunded': { label: 'Refunded', color: 'bg-gray-100 text-gray-700 border-gray-200' },
+      'partially_refunded': { label: 'Partially refunded', color: 'bg-gray-100 text-gray-700 border-gray-200' }
+    };
+    return map[order.payment_status] || null;
   };
 
   // Search form
@@ -176,7 +211,8 @@ function OrderTrackingContent() {
                 <input
                   type="text"
                   value={orderNumber}
-                  onChange={(e) => setOrderNumber(e.target.value)}
+                  onChange={(e) => setOrderNumber(e.target.value.toUpperCase())}
+                  autoComplete="off"
                   className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-brand focus:border-brand"
                   placeholder="e.g. ORD-1770328211911-915 or SLI-ABC123"
                 />
@@ -242,10 +278,18 @@ function OrderTrackingContent() {
   // Order tracking results
   const trackingSteps = getTrackingSteps();
   const statusBadge = getStatusBadge();
-  const trackingNumber = order.metadata?.tracking_number || '';
+  const paymentBadge = getPaymentBadge();
+  const trackingNumber = order.metadata?.tracking_number || order.tracking_number || '';
   const shippingAddress = order.shipping_address || {};
-  const estimatedDelivery = new Date(new Date(order.created_at).getTime() + 7 * 24 * 60 * 60 * 1000)
-    .toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const isDeliveryOrder = (order.shipping_method || order.metadata?.delivery_method) === 'delivery';
+  const hasPreorderItem = Array.isArray(order.order_items) && order.order_items.some((item: any) => item?.metadata?.is_preorder === true);
+  const isClosed = order.status === 'cancelled' || order.status === 'refunded' || order.status === 'delivered';
+  const estimatedDelivery = isDeliveryOrder && !hasPreorderItem && !isClosed
+    ? new Date(new Date(order.created_at).getTime() + 7 * 24 * 60 * 60 * 1000)
+      .toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+    : '';
+  const discountTotal = Number(order.discount_total || 0);
+  const shippingTotal = Number(order.shipping_total || 0);
 
   return (
     <main className="min-h-screen bg-gray-50 py-12 px-4">
@@ -270,12 +314,37 @@ function OrderTrackingContent() {
                   <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-sm">{trackingNumber}</span>
                 </p>
               )}
-              <p className="text-gray-500 text-sm mt-1">Estimated delivery: {estimatedDelivery}</p>
+              {estimatedDelivery && (
+                <p className="text-gray-500 text-sm mt-1">Estimated delivery: {estimatedDelivery}</p>
+              )}
+              {hasPreorderItem && !isClosed && (
+                <p className="text-gray-500 text-sm mt-1">Pre-order — we will contact you when your goods arrive.</p>
+              )}
             </div>
-            <div className={`px-4 py-2 rounded-full font-semibold whitespace-nowrap ${statusBadge.color}`}>
-              {statusBadge.label}
+            <div className="flex flex-wrap items-center gap-2">
+              {paymentBadge && (
+                <span className={`px-3 py-1.5 rounded-full text-sm font-semibold whitespace-nowrap border ${paymentBadge.color}`}>
+                  {paymentBadge.label}
+                </span>
+              )}
+              <div className={`px-4 py-2 rounded-full font-semibold whitespace-nowrap ${statusBadge.color}`}>
+                {statusBadge.label}
+              </div>
             </div>
           </div>
+
+          {(order.payment_status === 'pending' || order.payment_status === 'failed') && !isClosed && (
+            <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <p className="text-sm text-amber-800">
+                {order.payment_status === 'failed'
+                  ? 'Your last payment attempt did not go through.'
+                  : 'This order is waiting for payment.'}
+              </p>
+              <Link href={`/pay/${order.id}`} className="inline-flex items-center justify-center bg-brand-accent hover:bg-brand-accentDark text-white px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap">
+                Pay now
+              </Link>
+            </div>
+          )}
 
           <div className="grid md:grid-cols-3 gap-6 mb-8">
             <div className="p-4 bg-gray-50 rounded-lg">
@@ -284,9 +353,9 @@ function OrderTrackingContent() {
                   <i className="ri-map-pin-line text-xl text-brand"></i>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-600">Shipping To</p>
+                  <p className="text-sm text-gray-600">{isDeliveryOrder ? 'Delivering To' : 'Store Pickup'}</p>
                   <p className="font-semibold text-gray-900">
-                    {shippingAddress.city || shippingAddress.region || 'Ghana'}
+                    {isDeliveryOrder ? (shippingAddress.city || shippingAddress.region || 'Ghana') : 'Collect in store'}
                   </p>
                 </div>
               </div>
@@ -379,17 +448,11 @@ function OrderTrackingContent() {
             {order.order_items?.map((item: any) => (
               <div key={item.id} className="flex items-center space-x-4 p-4 bg-gray-50 rounded-lg">
                 <div className="w-20 h-20 bg-gray-200 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200">
-                  {item.products?.product_images?.[0]?.url || item.metadata?.image ? (
-                    <img
-                      src={item.products?.product_images?.[0]?.url || item.metadata?.image}
-                      alt={item.product_name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <i className="ri-image-line text-2xl text-gray-300"></i>
-                    </div>
-                  )}
+                  <img
+                    src={item.products?.product_images?.[0]?.url || item.metadata?.image || PLACEHOLDER_IMAGE}
+                    alt={item.product_name}
+                    className="w-full h-full object-cover"
+                  />
                 </div>
                 <div className="flex-1">
                   <h3 className="font-semibold text-gray-900">{item.product_name}</h3>
@@ -398,9 +461,47 @@ function OrderTrackingContent() {
                     <p className="text-xs text-gray-500">{item.variant_name}</p>
                   )}
                 </div>
-                <p className="font-bold text-brand">GH₵ {Number(item.unit_price).toFixed(2)}</p>
+                <div className="text-right">
+                  <p className="font-bold text-brand">{money(item.total_price ?? Number(item.unit_price) * Number(item.quantity))}</p>
+                  {Number(item.quantity) > 1 && (
+                    <p className="text-xs text-gray-500">{money(item.unit_price)} each</p>
+                  )}
+                </div>
               </div>
             ))}
+          </div>
+
+          <div className="border-t border-gray-200 mt-6 pt-4 space-y-2 text-sm">
+            <div className="flex justify-between text-gray-600">
+              <span>Subtotal</span>
+              <span>{money(order.subtotal)}</span>
+            </div>
+            {discountTotal > 0 && (
+              <div className="flex justify-between text-gray-600">
+                <span>Discount{order.metadata?.coupon_code ? ` (${order.metadata.coupon_code})` : ''}</span>
+                <span>-{money(discountTotal)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-gray-600">
+              <span>Delivery</span>
+              <span>{shippingTotal > 0 ? money(shippingTotal) : isDeliveryOrder ? 'Free' : 'Free store pickup'}</span>
+            </div>
+            <div className="flex justify-between text-lg font-bold text-gray-900 border-t border-gray-200 pt-2">
+              <span>Total</span>
+              <span>{money(order.total)}</span>
+            </div>
+            {Number(order.amount_paid || 0) > 0 && Number(order.balance_due || 0) > 0.01 && (
+              <>
+                <div className="flex justify-between text-gray-600">
+                  <span>Paid so far</span>
+                  <span>{money(order.amount_paid)}</span>
+                </div>
+                <div className="flex justify-between text-brand-accent font-semibold">
+                  <span>Balance due</span>
+                  <span>{money(order.balance_due)}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
 

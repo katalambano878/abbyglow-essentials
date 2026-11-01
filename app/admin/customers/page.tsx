@@ -4,7 +4,19 @@
 import Link from 'next/link';
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
-import { fetchAdminCustomers } from '@/lib/admin/customers';
+import { fetchAdminCustomers, customersToCsv } from '@/lib/admin/customers';
+
+const downloadCsv = (content: string, filename: string) => {
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+};
 
 export default function AdminCustomersPage() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -13,6 +25,7 @@ export default function AdminCustomersPage() {
   const [loading, setLoading] = useState(true);
   const [sortOption, setSortOption] = useState('Sort by Join Date');
   const [filterStatus, setFilterStatus] = useState('All Customers');
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -38,12 +51,36 @@ export default function AdminCustomersPage() {
         rawLastOrder: customer.lastOrder,
         isGuest: customer.isGuest,
       })));
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching customers:', error);
+      setLoadError(error?.message || 'Failed to load customers');
     } finally {
       setLoading(false);
     }
   };
+
+  const exportRows = (rows: any[]) =>
+    rows.map((c) => ({
+      name: c.name,
+      email: c.email,
+      phone: c.phone === 'N/A' ? '' : c.phone,
+      orders: c.orders,
+      totalSpent: c.totalSpent,
+      joined: c.rawJoined,
+      lastOrder: c.rawLastOrder,
+      status: c.status,
+      isGuest: c.isGuest,
+    }));
+
+  const handleExport = (onlySelected: boolean) => {
+    const rows = onlySelected ? filteredCustomers.filter((c) => selectedCustomers.includes(c.id)) : filteredCustomers;
+    downloadCsv(customersToCsv(exportRows(rows)), onlySelected ? 'selected-customers.csv' : 'customers.csv');
+  };
+
+  const selectedEmails = customers
+    .filter((c) => selectedCustomers.includes(c.id) && c.email)
+    .map((c) => c.email);
+  const sendEmailHref = `/admin/notifications?to=${encodeURIComponent(selectedEmails.join(','))}`;
 
   const getInitials = (name: string) => {
     if (!name) return '??';
@@ -76,10 +113,10 @@ export default function AdminCustomersPage() {
   };
 
   const handleSelectAll = () => {
-    if (selectedCustomers.length === customers.length) {
+    if (selectedCustomers.length === filteredCustomers.length) {
       setSelectedCustomers([]);
     } else {
-      setSelectedCustomers(customers.map(c => c.id));
+      setSelectedCustomers(filteredCustomers.map(c => c.id));
     }
   };
 
@@ -141,11 +178,19 @@ export default function AdminCustomersPage() {
           <h1 className="text-3xl font-bold text-gray-900">Customers</h1>
           <p className="text-gray-600 mt-1">Manage your customer base and relationships</p>
         </div>
-        <button className="bg-brand hover:bg-brand-dark text-white px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap cursor-pointer">
+        <button
+          onClick={() => handleExport(false)}
+          disabled={loading || filteredCustomers.length === 0}
+          className="bg-brand hover:bg-brand-dark text-white px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50"
+        >
           <i className="ri-download-line mr-2"></i>
           Export Customers
         </button>
       </div>
+
+      {loadError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 text-sm">{loadError}</div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl border-2 border-gray-200 p-4">
@@ -214,15 +259,19 @@ export default function AdminCustomersPage() {
               {selectedCustomers.length} customer{selectedCustomers.length > 1 ? 's' : ''} selected
             </p>
             <div className="flex items-center space-x-2">
-              <button className="px-4 py-2 bg-brand hover:bg-brand-dark text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer">
-                <i className="ri-mail-line mr-2"></i>
-                Send Email
-              </button>
-              <button className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer">
-                <i className="ri-vip-crown-line mr-2"></i>
-                Mark as VIP
-              </button>
-              <button className="px-4 py-2 bg-gray-700 hover:bg-gray-800 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer">
+              {selectedEmails.length > 0 && (
+                <Link
+                  href={sendEmailHref}
+                  className="px-4 py-2 bg-brand hover:bg-brand-dark text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer"
+                >
+                  <i className="ri-mail-line mr-2"></i>
+                  Send Email ({selectedEmails.length})
+                </Link>
+              )}
+              <button
+                onClick={() => handleExport(true)}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-800 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap cursor-pointer"
+              >
                 <i className="ri-download-line mr-2"></i>
                 Export
               </button>
@@ -307,12 +356,15 @@ export default function AdminCustomersPage() {
                         >
                           <i className="ri-eye-line text-lg"></i>
                         </Link>
-                        <button className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-brand hover:bg-brand-soft rounded-lg transition-colors cursor-pointer">
-                          <i className="ri-mail-line text-lg"></i>
-                        </button>
-                        <button className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer">
-                          <i className="ri-delete-bin-line text-lg"></i>
-                        </button>
+                        {customer.email && (
+                          <Link
+                            href={`/admin/notifications?to=${encodeURIComponent(customer.email)}`}
+                            title={`Email ${customer.email}`}
+                            className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-brand hover:bg-brand-soft rounded-lg transition-colors cursor-pointer"
+                          >
+                            <i className="ri-mail-line text-lg"></i>
+                          </Link>
+                        )}
                       </div>
                     </td>
                   </tr>

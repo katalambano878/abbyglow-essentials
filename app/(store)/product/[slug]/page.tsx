@@ -54,7 +54,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
 
   const { data: product } = await supabase
     .from('products')
-    .select('name, slug, description, price, quantity, sku, product_images(url, position), categories(name)')
+    .select('name, slug, description, price, quantity, sku, metadata, product_images(url, position), categories(name), product_variants(quantity)')
     .eq('slug', slug)
     .eq('status', 'active')
     .single();
@@ -74,7 +74,11 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
           slug: product.slug,
           price: Number(product.price),
           sku: product.sku || product.slug,
-          inStock: Number(product.quantity) > 0,
+          inStock:
+            Number(product.quantity) > 0 ||
+            (Array.isArray(product.product_variants) &&
+              product.product_variants.some((v: any) => Number(v?.quantity) > 0)) ||
+            Boolean((product.metadata as any)?.is_preorder),
           category: categoryName,
         }),
         breadcrumbSchema([

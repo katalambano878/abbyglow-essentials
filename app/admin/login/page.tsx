@@ -1,50 +1,118 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabase';
 import { useRecaptcha } from '@/hooks/useRecaptcha';
 
-export default function AdminLoginPage() {
+const ACCESS_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
+const REFRESH_COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
+
+/** `Secure` only over https — on plain-http dev hosts the browser would drop the cookie and login would loop. */
+const cookieFlags = () => `path=/; SameSite=Lax${window.location.protocol === 'https:' ? '; Secure' : ''}`;
+
+const setSessionCookies = (accessToken: string, refreshToken?: string | null) => {
+  document.cookie = `sb-access-token=${accessToken}; max-age=${ACCESS_COOKIE_MAX_AGE}; ${cookieFlags()}`;
+  if (refreshToken) {
+    document.cookie = `sb-refresh-token=${refreshToken}; max-age=${REFRESH_COOKIE_MAX_AGE}; ${cookieFlags()}`;
+  }
+};
+
+const clearSessionCookies = () => {
+  document.cookie = `sb-access-token=; max-age=0; ${cookieFlags()}`;
+  document.cookie = `sb-refresh-token=; max-age=0; ${cookieFlags()}`;
+};
+
+/** Only allow redirects back into the admin area. */
+const safeRedirect = (value: string | null) =>
+  value && value.startsWith('/admin') && !value.startsWith('//') ? value : '/admin';
+
+const errorMessages: Record<string, string> = {
+  session_expired: 'Your session expired, please sign in again',
+  unauthorized: 'This account does not have admin access',
+};
+
+function AdminLoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTo = safeRedirect(searchParams.get('redirect'));
+  const urlError = searchParams.get('error');
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [error, setError] = useState('');
-  const { getToken, verifying } = useRecaptcha();
+  const [info, setInfo] = useState(() => (urlError && errorMessages[urlError]) || '');
+  const { getCaptchaToken, verifying } = useRecaptcha();
+
+  // Already signed in with an admin/staff profile? Set the cookie and go straight in.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (urlError === 'unauthorized') return;
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', session.user.id)
+          .maybeSingle();
+        if (cancelled) return;
+        if (profile && (profile.role === 'admin' || profile.role === 'staff')) {
+          setSessionCookies(session.access_token, session.refresh_token);
+          router.replace(redirectTo);
+          return;
+        }
+      } catch (err) {
+        console.warn('Session check failed:', err);
+      } finally {
+        if (!cancelled) setCheckingSession(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [router, redirectTo, urlError]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setInfo('');
     setIsLoading(true);
 
-    // reCAPTCHA verification
-    const isHuman = await getToken('admin_login');
-    if (!isHuman) {
-      setError('Security verification failed. Please try again.');
-      setIsLoading(false);
-      return;
-    }
-
     try {
+      const captchaToken = (await getCaptchaToken('admin_login')) || undefined;
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
-        password
+        password,
+        options: { captchaToken },
       });
 
       if (error) throw error;
+      if (!data.session) throw new Error('Login failed');
 
-      if (data.session) {
-        // Set auth cookie so middleware can verify the session server-side
-        document.cookie = `sb-access-token=${data.session.access_token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`;
-        document.cookie = `sb-refresh-token=${data.session.refresh_token}; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax; Secure`;
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', data.session.user.id)
+        .maybeSingle();
 
-        router.push('/admin');
-        router.refresh();
+      if (profileError || !profile || (profile.role !== 'admin' && profile.role !== 'staff')) {
+        clearSessionCookies();
+        await supabase.auth.signOut();
+        clearSessionCookies();
+        throw new Error(errorMessages.unauthorized);
       }
+
+      // Set auth cookies so middleware can verify the session server-side
+      setSessionCookies(data.session.access_token, data.session.refresh_token);
+
+      router.push(redirectTo);
+      router.refresh();
     } catch (err: any) {
       setError(err.message || 'Login failed');
     } finally {
@@ -64,6 +132,13 @@ export default function AdminLoginPage() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
+          {info && !error && (
+            <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start space-x-3">
+              <i className="ri-information-line text-amber-600 text-xl mt-0.5"></i>
+              <p className="text-amber-800 text-sm">{info}</p>
+            </div>
+          )}
+
           {error && (
             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start space-x-3">
               <i className="ri-error-warning-line text-red-600 text-xl mt-0.5"></i>
@@ -87,6 +162,7 @@ export default function AdminLoginPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full pl-12 pr-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-brand focus:border-brand"
                   placeholder="admin@example.com"
+                  autoComplete="username"
                   required
                 />
               </div>
@@ -104,6 +180,7 @@ export default function AdminLoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full pl-12 pr-12 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-brand focus:border-brand"
                   placeholder="Enter your password"
+                  autoComplete="current-password"
                   required
                 />
                 <button
@@ -118,13 +195,13 @@ export default function AdminLoginPage() {
 
             <button
               type="submit"
-              disabled={isLoading || verifying}
+              disabled={isLoading || verifying || checkingSession}
               className="w-full bg-brand hover:bg-brand-dark text-white py-3 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
             >
-              {isLoading || verifying ? (
+              {isLoading || verifying || checkingSession ? (
                 <span className="flex items-center justify-center space-x-2">
                   <i className="ri-loader-4-line animate-spin"></i>
-                  <span>{verifying ? 'Verifying...' : 'Signing in...'}</span>
+                  <span>{checkingSession ? 'Checking session...' : verifying ? 'Verifying...' : 'Signing in...'}</span>
                 </span>
               ) : (
                 'Sign In'
@@ -143,5 +220,13 @@ export default function AdminLoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function AdminLoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-gray-500">Loading...</div>}>
+      <AdminLoginForm />
+    </Suspense>
   );
 }

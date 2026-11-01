@@ -29,7 +29,8 @@ export function formatLocalPhone(localNumber: string): string {
   }
   return localNumber;
 }
-export const SITE_EMAIL = process.env.ADMIN_EMAIL || '';
+// Public contact address only — the admin mailbox must never be embedded in page markup.
+export const SITE_EMAIL = process.env.NEXT_PUBLIC_CONTACT_EMAIL || '';
 export const SITE_LOCALE = 'en_GH';
 export const DEFAULT_OG_IMAGE = '/og-image.png';
 

@@ -9,13 +9,7 @@ import ProductCardSkeleton from '@/components/skeletons/ProductCardSkeleton';
 import { isPreorderProduct } from '@/lib/preorder';
 import { displayCompareAtPrice } from '@/lib/storefront-pricing';
 
-const FALLBACK_CATEGORIES = [
-  { id: 'electronics', name: 'Electronics', slug: 'electronics', image_url: '/images/categories/electronics.png' },
-  { id: 'beauty', name: 'Beauty & Skincare', slug: 'beauty', image_url: '/images/categories/beauty.png' },
-  { id: 'home-kitchen', name: 'Home & Kitchen', slug: 'home-kitchen', image_url: '/images/categories/home-kitchen.png' },
-  { id: 'fashion', name: 'Fashion & Accessories', slug: 'fashion', image_url: '/images/categories/fashion.png' },
-  { id: 'fitness', name: 'Fitness & Sports', slug: 'fitness', image_url: '/images/categories/fitness.png' },
-];
+const PLACEHOLDER_IMAGE = '/images/placeholder-product.svg';
 
 export default function HomePage() {
   const [featuredProducts, setFeaturedProducts] = useState<any[]>([]);
@@ -107,9 +101,9 @@ export default function HomePage() {
       name: product.name,
       price: product.price,
       originalPrice: displayCompareAtPrice(product.compare_at_price, product.price),
-      image: product.product_images?.[0]?.url || '/images/categories/electronics.png',
-      rating: product.rating_avg || 5,
-      reviewCount: product.review_count || 0,
+      image: product.product_images?.[0]?.url || PLACEHOLDER_IMAGE,
+      rating: Number(product.rating_avg) || 0,
+      reviewCount: Number(product.review_count) || 0,
       badge: undefined as string | undefined,
       inStock: effectiveStock > 0,
       maxStock: effectiveStock || 50,
@@ -123,7 +117,7 @@ export default function HomePage() {
     };
   };
 
-  const displayCategories = (categories.length > 0 ? categories : FALLBACK_CATEGORIES).slice(0, 5);
+  const displayCategories = categories.slice(0, 5);
   const arrivals = (newProducts.length > 0 ? newProducts : featuredProducts).slice(0, 8);
 
   return (
@@ -169,6 +163,7 @@ export default function HomePage() {
         </div>
       </section>
 
+      {displayCategories.length > 0 && (
       <section className="py-16 md:py-20 bg-white">
         <div className="max-w-[1400px] mx-auto px-4 sm:px-8">
           <h2 className="text-center text-[26px] sm:text-[32px] font-black uppercase tracking-tight text-black mb-10">
@@ -183,7 +178,7 @@ export default function HomePage() {
               >
                 <div className="aspect-[3/4] overflow-hidden relative bg-black rounded-2xl md:rounded-3xl">
                   <Image
-                    src={category.image_url || '/images/categories/electronics.png'}
+                    src={category.image_url || PLACEHOLDER_IMAGE}
                     alt={category.name}
                     fill
                     className="object-cover opacity-80 transition-transform duration-700 group-hover:scale-105 group-hover:opacity-60"
@@ -202,6 +197,7 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+      )}
 
       <section className="py-16 md:py-20 bg-white border-t border-black/5">
         <div className="max-w-[1100px] mx-auto px-4 sm:px-8">
