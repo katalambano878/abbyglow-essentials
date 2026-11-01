@@ -58,6 +58,35 @@ export default function InventoryManagementPage() {
     fetchInventory();
   }, []);
 
+  const [stockDrafts, setStockDrafts] = useState<Record<string, string>>({});
+  const [savingStockId, setSavingStockId] = useState<string | null>(null);
+
+  /** Inline stock edit for products without variants (variant stock is edited on the product page). */
+  const saveStock = async (productId: string) => {
+    const raw = stockDrafts[productId];
+    const next = Math.max(0, Math.floor(Number(raw)));
+    if (raw === undefined || !Number.isFinite(next)) return;
+    try {
+      setSavingStockId(productId);
+      const { error } = await supabase
+        .from('products')
+        .update({ quantity: next, updated_at: new Date().toISOString() })
+        .eq('id', productId);
+      if (error) throw error;
+      setProducts(prev => prev.map(p => {
+        if (p.id !== productId) return p;
+        const status = next === 0 ? 'out' : next < LOW_STOCK_THRESHOLD ? 'low' : 'good';
+        return { ...p, currentStock: next, status };
+      }));
+      setStockDrafts(prev => { const copy = { ...prev }; delete copy[productId]; return copy; });
+      setNotice({ type: 'success', text: `Stock updated to ${next}.` });
+    } catch (err: any) {
+      setNotice({ type: 'error', text: `Could not update stock: ${err?.message || 'unknown error'}` });
+    } finally {
+      setSavingStockId(null);
+    }
+  };
+
   const fetchInventory = async () => {
     try {
       setLoading(true);
@@ -70,7 +99,8 @@ export default function InventoryManagementPage() {
           price,
           quantity,
           status,
-          categories(name)
+          categories(name),
+          product_variants(id)
         `)
         .order('name');
 
@@ -93,6 +123,7 @@ export default function InventoryManagementPage() {
             price: Number(p.price) || 0,
             productStatus: p.status,
             status,
+            variantCount: Array.isArray(p.product_variants) ? p.product_variants.length : 0,
           };
         });
         setProducts(mapped);
@@ -413,7 +444,40 @@ export default function InventoryManagementPage() {
                       <td className="px-6 py-4 text-gray-700 font-mono text-sm">{product.sku || '—'}</td>
                       <td className="px-6 py-4 text-gray-700">{product.category}</td>
                       <td className="px-6 py-4">
-                        <span className="font-semibold text-gray-900">{product.currentStock}</span>
+                        {product.variantCount > 0 ? (
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-gray-900">{product.currentStock}</span>
+                            <Link
+                              href={`/admin/products/${product.id}`}
+                              className="text-xs text-brand hover:underline whitespace-nowrap"
+                              title="Stock is tracked per variant"
+                            >
+                              {product.variantCount} variants
+                            </Link>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min={0}
+                              value={stockDrafts[product.id] ?? product.currentStock}
+                              onChange={(e) => setStockDrafts(prev => ({ ...prev, [product.id]: e.target.value }))}
+                              onKeyDown={(e) => { if (e.key === 'Enter') saveStock(product.id); }}
+                              className="w-20 px-2 py-1.5 border border-gray-300 rounded-lg text-sm font-semibold text-gray-900 focus:ring-1 focus:ring-brand focus:border-brand"
+                              aria-label={`Stock for ${product.name}`}
+                            />
+                            {stockDrafts[product.id] !== undefined && Number(stockDrafts[product.id]) !== product.currentStock && (
+                              <button
+                                type="button"
+                                onClick={() => saveStock(product.id)}
+                                disabled={savingStockId === product.id}
+                                className="px-2.5 py-1.5 bg-brand text-white rounded-lg text-xs font-semibold hover:bg-brand-dark disabled:opacity-50 whitespace-nowrap cursor-pointer"
+                              >
+                                {savingStockId === product.id ? 'Saving…' : 'Save'}
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <span className="font-semibold text-gray-900">

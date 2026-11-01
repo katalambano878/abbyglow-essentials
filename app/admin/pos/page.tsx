@@ -382,7 +382,15 @@ export default function POSPage() {
                 }
 
                 // Success — show completed
-                setCompletedOrder({ id: order.id, orderNumber, total: grandTotal, items: cart });
+                // Snapshot the change now — the cart (and therefore grandTotal) is cleared right after.
+                setCompletedOrder({
+                    id: order.id,
+                    orderNumber,
+                    total: grandTotal,
+                    items: cart,
+                    paymentMethod,
+                    changeDue: paymentMethod === 'cash' ? Math.max(0, (parseFloat(amountTendered) || 0) - grandTotal) : 0,
+                });
                 setCart([]);
 
                 // Send notification (server resolves the order by its number)
@@ -666,10 +674,10 @@ export default function POSPage() {
                                     </h2>
                                     <p className="text-gray-500 mt-1">Order #{completedOrder.orderNumber}</p>
 
-                                    {!completedOrder.paymentPending && paymentMethod === 'cash' && changeDue > 0 && (
+                                    {!completedOrder.paymentPending && completedOrder.paymentMethod === 'cash' && Number(completedOrder.changeDue) > 0 && (
                                         <div className="mt-3 bg-brand-soft border border-brand/30 rounded-lg p-3">
                                             <p className="text-sm text-brand">Change Due</p>
-                                            <p className="text-2xl font-bold text-brand">GH₵{changeDue.toFixed(2)}</p>
+                                            <p className="text-2xl font-bold text-brand">GH₵{Number(completedOrder.changeDue).toFixed(2)}</p>
                                         </div>
                                     )}
 

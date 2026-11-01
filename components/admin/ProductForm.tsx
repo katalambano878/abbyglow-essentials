@@ -150,6 +150,24 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
         return data;
     });
 
+    /**
+     * Variants that were never given their own price follow the base price.
+     * (They are stored with an explicit value because the column is NOT NULL,
+     * so without this a base-price change would silently leave them behind.)
+     */
+    const handleBasePriceChange = (next: string) => {
+        const previous = String(price ?? '');
+        setVariantData(prev => {
+            const updated: typeof prev = {};
+            for (const [key, entry] of Object.entries(prev)) {
+                const follows = entry.price === '' || entry.price === previous || Number(entry.price) === Number(previous);
+                updated[key] = follows ? { ...entry, price: next } : entry;
+            }
+            return updated;
+        });
+        setPrice(next);
+    };
+
     // Computed: all variant combinations
     const variantCombinations = (() => {
         const combos: { color: string; colorHex: string; size: string; key: string }[] = [];
@@ -765,7 +783,7 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
                                         <input
                                             type="number"
                                             value={price}
-                                            onChange={(e) => setPrice(e.target.value)}
+                                            onChange={(e) => handleBasePriceChange(e.target.value)}
                                             className="w-full pl-16 pr-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-brand focus:border-brand"
                                             step="0.01"
                                             placeholder="0.00"

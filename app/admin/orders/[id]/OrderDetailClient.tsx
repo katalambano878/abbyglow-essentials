@@ -23,6 +23,7 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
   const [trackingNumber, setTrackingNumber] = useState('');
   const [adminNotes, setAdminNotes] = useState('');
   const [statusUpdating, setStatusUpdating] = useState(false);
@@ -189,8 +190,8 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
   };
 
   const handleUpdateStatus = async (newStatus?: string, options: { reason?: string; onHold?: boolean } = {}) => {
-    if (!order) return;
-    const statusToUpdate = newStatus || order.status;
+    if (!order || statusUpdating) return;
+    const statusToUpdate = newStatus || pendingStatus || order.status;
 
     // Transition guards
     if (['shipped', 'delivered'].includes(statusToUpdate) && !isPaidLike(order.payment_status)) {
@@ -298,6 +299,7 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
       setShowStatusMenu(false);
       setCancelPrompt(false);
       setCancellationReason('');
+      setPendingStatus(null);
     } catch (err: any) {
       console.error('Error updating order:', err);
       setNotice({ type: 'error', text: `Failed to update order: ${err?.message || 'unknown error'}` });
@@ -370,7 +372,12 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
   };
 
   const statusOptions = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
-  const statusLabel = (s: string) => s === 'shipped' ? 'Packaged' : s.charAt(0).toUpperCase() + s.slice(1);
+  const statusLabel = (s: string) => {
+    if (s === 'shipped') return 'Packaged';
+    if (s === 'awaiting_payment') return 'Awaiting payment';
+    const clean = (s || '').replace(/_/g, ' ');
+    return clean.charAt(0).toUpperCase() + clean.slice(1);
+  };
   const statusColors: any = {
     'pending': 'bg-amber-100 text-amber-700 border-amber-200',
     'processing': 'bg-brand-soft text-brand border-brand/30',
@@ -383,7 +390,7 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
   if (loading) return <div className="p-8 text-center">Loading...</div>;
   if (error || !order) return <div className="p-8 text-center text-red-500">{error || 'Order not found'}</div>;
 
-  const currentStatus = order.status || 'pending';
+  const currentStatus = pendingStatus || order.status || 'pending';
   const shippingAddress = order.shipping_address || {};
   const customerName = (shippingAddress.firstName && shippingAddress.lastName)
     ? `${shippingAddress.firstName.trim()} ${shippingAddress.lastName.trim()}`
@@ -687,7 +694,9 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
                       <button
                         key={status}
                         onClick={() => {
-                          handleUpdateStatus(status);
+                          // Selecting only stages the change; "Update Status" applies it.
+                          setPendingStatus(status === order?.status ? null : status);
+                          setShowStatusMenu(false);
                         }}
                         className={`w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors ${status === currentStatus ? 'bg-brand-soft font-semibold' : ''
                           }`}
@@ -716,7 +725,7 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
                 disabled={statusUpdating}
                 className="w-full mt-4 bg-brand hover:bg-brand-dark text-white py-3 rounded-lg font-semibold transition-colors whitespace-nowrap disabled:opacity-50"
               >
-                {statusUpdating ? 'Updating...' : 'Update Status'}
+                {statusUpdating ? 'Updating...' : pendingStatus ? `Update Status to ${statusLabel(pendingStatus)}` : 'Save Tracking & Notes'}
               </button>
             </div>
 

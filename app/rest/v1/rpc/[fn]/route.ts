@@ -12,7 +12,9 @@ const PG_IDENT = /^[a-z_][a-z0-9_]*$/i;
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST,OPTIONS",
-  "Access-Control-Allow-Headers": "authorization, apikey, content-type",
+  // Same header set supabase-js sends to the table shim (profiles, prefer, client info).
+  "Access-Control-Allow-Headers":
+    "authorization, apikey, content-type, prefer, x-client-info, accept-profile, content-profile",
 };
 
 export async function OPTIONS() {

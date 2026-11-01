@@ -47,6 +47,35 @@ See the commit for the per-file list. Highlights: fake flows replaced with real 
 wired, duplicate headers removed, placeholder image hosted locally, review moderation copy,
 admin login redirect/error handling, cookie consent gating analytics.
 
+## Admin click-through (second pass)
+
+Every control on every admin page was exercised against the local database: dashboard
+range/links; orders stats, tabs, filters, sort, search, bulk status, CSV export, resend
+payment link; order detail status/cancel (with stock restore), notes, resend
+notifications; products search/filters/sort/view, create → edit (price, variants, stock)
+→ preview → delete; categories create/edit/delete; inventory filters, import dialog,
+export, selection; coupons create/edit/enable/disable/copy/delete and storefront
+validation; reviews approve/reject/bulk/sort; blog create/publish/unpublish/edit/delete
+and storefront visibility; modules toggle (sidebar updates); customers filter/sort/
+select/export/email, customer detail inline edit; insights segments/export; analytics
+range/export; notifications campaign (batched send with progress); POS add/quantity/
+charge/cash checkout (payment event + stock); SMS credit (unconfigured state); SMS
+debugger (clean failure without keys); sidebar, user menu, logout.
+
+Fixed in this pass:
+
+- Order detail: picking a status in the dropdown saved immediately and the Update button
+  then re-saved the stale status, so quick clicks reverted the change. The dropdown now
+  only stages the status; the button applies it. `awaiting_payment` is labelled properly.
+- Inventory had no way to change a quantity despite its heading; each row now has an
+  inline stock editor (variant products link to the editor instead).
+- Product editor: variants created with the base price now follow later base-price edits
+  instead of silently keeping the old price.
+- POS success panel showed the tendered amount as "change due"; change is now
+  snapshotted at completion.
+- RPC shim CORS preflight rejected supabase-js's `content-profile` header (only hit
+  cross-origin, e.g. a dev host); it now matches the table shim.
+
 ## Verified locally
 
 Against a fresh local Postgres (`abbyglow_dev`): ACL denials, embed block, role escalation
