@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { deliveryMethodLabel } from '@/lib/shipping';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { useCart } from '@/context/CartContext';
@@ -34,6 +35,7 @@ interface Order {
   balanceDue: number;
   amountPaid: number;
   shippingAddress: any;
+  deliveryMethod: string;
   items: OrderItem[];
 }
 
@@ -79,6 +81,7 @@ export default function OrderHistory() {
           balanceDue: Number(order.balance_due) || 0,
           amountPaid: Number(order.amount_paid) || 0,
           shippingAddress: order.shipping_address || null,
+          deliveryMethod: order.shipping_method || order.metadata?.delivery_method || 'pickup',
           items: (order.order_items || []).map((item: any) => ({
             id: item.id,
             productId: item.product_id || null,
@@ -239,7 +242,7 @@ export default function OrderHistory() {
       <table class="totals">
         <tr><td>Subtotal</td><td class="num">GH₵${order.subtotal.toFixed(2)}</td></tr>
         ${order.discountTotal > 0 ? `<tr><td>Discount</td><td class="num">-GH₵${order.discountTotal.toFixed(2)}</td></tr>` : ''}
-        <tr><td>Delivery</td><td class="num">GH₵${order.shippingTotal.toFixed(2)}</td></tr>
+        <tr><td>Delivery (${escapeHtml(deliveryMethodLabel(order.deliveryMethod))})</td><td class="num">GH₵${order.shippingTotal.toFixed(2)}</td></tr>
         <tr><td><strong>Total</strong></td><td class="num"><strong>GH₵${order.total.toFixed(2)}</strong></td></tr>
         <tr><td>Paid</td><td class="num">GH₵${order.amountPaid.toFixed(2)}</td></tr>
         ${order.balanceDue > 0 ? `<tr><td>Balance due</td><td class="num">GH₵${order.balanceDue.toFixed(2)}</td></tr>` : ''}
@@ -344,6 +347,13 @@ export default function OrderHistory() {
                     <div className="w-full sm:w-auto">
                       <p className="text-xs text-gray-600 mb-1">Total</p>
                       <p className="font-bold text-brand">GH₵{order.total.toFixed(2)}</p>
+                    </div>
+                    <div className="w-full sm:w-auto">
+                      <p className="text-xs text-gray-600 mb-1">Delivery</p>
+                      <p className="font-semibold text-gray-900">
+                        {deliveryMethodLabel(order.deliveryMethod)}
+                        <span className="text-gray-500 font-normal"> · {order.shippingTotal > 0 ? `GH₵${order.shippingTotal.toFixed(2)}` : 'Free'}</span>
+                      </p>
                     </div>
                     {canPayBalance && (
                       <div className="w-full sm:w-auto">

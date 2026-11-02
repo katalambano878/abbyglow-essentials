@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { deliveryMethodLabel, isDeliveryMethod, orderChannelLabel } from '@/lib/shipping';
 import { supabaseAdmin as supabase } from '@/lib/supabase-admin';
 import { escapeHtml } from '@/lib/sanitize';
 import { fetchWithTimeout } from '@/lib/fetch-timeout';
@@ -119,7 +120,7 @@ function emailTotalsTable(order: any): string {
 ${line('Subtotal', fmt(subtotal))}
 ${line('Delivery', shippingVal > 0 ? fmt(shippingVal) : 'Free / Pickup')}
 ${discountVal > 0 ? line('Discount', `-${fmt(discountVal)}`) : ''}
-${line('Payment plan', plan)}
+${isDepositPlan(order.payment_plan) ? line('Payment plan', plan) : ''}
 ${paid > 0 ? line('Amount paid', fmt(paid)) : ''}
 ${balance > 0.01 ? line('Balance on delivery', fmt(balance)) : ''}
 <tr><td colspan="2" style="border-top:1px solid #e5e7eb;padding:0;"></td></tr>
@@ -140,7 +141,7 @@ function emailAddressBlock(order: any): string {
     ].filter(Boolean).map((l: string) => escapeHtml(String(l)));
     if (lines.length === 0) return '';
 
-    const methodLabel = order.shipping_method === 'pickup' ? 'Store Pickup' : 'Delivery';
+    const methodLabel = deliveryMethodLabel(order.shipping_method || order.metadata?.delivery_method);
     return `<div style="background-color:#f9fafb;border-radius:12px;padding:16px 20px;margin:20px 0;">
 <p style="margin:0 0 8px;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;font-weight:700;">${methodLabel} Address</p>
 ${lines.map(l => `<p style="margin:2px 0;color:#374151;font-size:13px;line-height:1.5;">${l}</p>`).join('')}
@@ -409,9 +410,10 @@ ${emailButton('Track Your Order', trackingUrl)}
   ${emailInfoRow('Customer', name)}
   ${emailInfoRow('Email', `<a href="mailto:${escapeHtml(String(email || ''))}" style="color:${BRAND.color};">${escapeHtml(String(email || ''))}</a>`)}
   ${phone ? emailInfoRow('Phone', `<a href="tel:${escapeHtml(String(phone))}" style="color:${BRAND.color};">${escapeHtml(String(phone))}</a>`) : ''}
-  ${emailInfoRow('Fulfilment', order.shipping_method === 'pickup' ? 'Store Pickup' : 'Delivery')}
+  ${emailInfoRow('Fulfilment', deliveryMethodLabel(order.shipping_method || order.metadata?.delivery_method))}
+  ${emailInfoRow('Channel', orderChannelLabel(order))}
   ${emailInfoRow('Payment', `${escapeHtml(order.payment_method || 'N/A')} — ${escapeHtml(order.payment_status || 'pending')}`)}
-  ${emailInfoRow('Plan', isDepositPlan(order.payment_plan) ? depositPlanLabel() : 'Full payment')}
+  ${isDepositPlan(order.payment_plan) ? emailInfoRow('Plan', depositPlanLabel()) : ''}
   ${Number(order.amount_paid || 0) > 0 ? emailInfoRow('Paid', `GH&#8373;${Number(order.amount_paid).toFixed(2)}`) : ''}
   ${Number(order.balance_due || 0) > 0.01 ? emailInfoRow('Balance due', `GH&#8373;${Number(order.balance_due).toFixed(2)}`) : ''}
   ${trackingNumber ? emailInfoRow('Tracking', trackingNumber) : ''}

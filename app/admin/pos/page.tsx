@@ -3,6 +3,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { fetchPosCustomers } from '@/lib/admin/customers';
+import {
+    computeShipping,
+    deliveryMethodLabel,
+    DEFAULT_DELIVERY_RATES,
+    normalizeDeliveryRates,
+    type DeliveryMethod,
+    type DeliveryRates,
+} from '@/lib/shipping';
 
 interface Product {
     id: string;
@@ -57,7 +65,8 @@ export default function POSPage() {
     const [checkoutError, setCheckoutError] = useState<string | null>(null);
     const [stockNotice, setStockNotice] = useState<string | null>(null);
     const [linkCopied, setLinkCopied] = useState(false);
-    const [deliveryMethod, setDeliveryMethod] = useState<'pickup' | 'doorstep'>('pickup');
+    const [deliveryMethod, setDeliveryMethod] = useState<DeliveryMethod>('pickup');
+    const [deliveryRates, setDeliveryRates] = useState<DeliveryRates>(DEFAULT_DELIVERY_RATES);
     const [guestDetails, setGuestDetails] = useState({
         firstName: '',
         lastName: '',
@@ -192,7 +201,20 @@ export default function POSPage() {
 
     const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.cartQuantity), 0);
     const tax = cartTotal * 0.0;
-    const grandTotal = cartTotal + tax;
+    const deliveryFee = computeShipping(cartTotal, deliveryMethod, deliveryRates);
+    const grandTotal = Math.round((cartTotal + tax + deliveryFee) * 100) / 100;
+
+    // Same delivery fees the online checkout charges (Admin → Delivery Fees).
+    useEffect(() => {
+        let cancelled = false;
+        fetch('/api/storefront/delivery-rates')
+            .then((r) => (r.ok ? r.json() : null))
+            .then((json) => {
+                if (!cancelled && json?.rates) setDeliveryRates(normalizeDeliveryRates(json.rates));
+            })
+            .catch(() => { /* keep defaults */ });
+        return () => { cancelled = true; };
+    }, []);
     const changeDue = amountTendered ? (parseFloat(amountTendered) - grandTotal) : 0;
 
     // Get the customer email and phone for the order
@@ -232,8 +254,8 @@ export default function POSPage() {
             if (!hasName && !hasContact) return 'Please enter customer name or contact info';
         }
 
-        // Require address for doorstep delivery
-        if (deliveryMethod === 'doorstep') {
+        // Require address for any delivery
+        if (deliveryMethod !== 'pickup') {
             if (!guestDetails.address.trim()) return 'Delivery address is required';
             if (!guestDetails.city.trim()) return 'City is required for delivery';
             if (!guestDetails.region) return 'Region is required for delivery';
@@ -296,7 +318,7 @@ export default function POSPage() {
                     currency: 'GHS',
                     subtotal: cartTotal,
                     tax_total: tax,
-                    shipping_total: 0,
+                    shipping_total: deliveryFee,
                     discount_total: 0,
                     total: grandTotal,
                     payment_plan: 'full',
@@ -310,6 +332,9 @@ export default function POSPage() {
                     metadata: {
                         pos_sale: true,
                         checkout_source: 'pos',
+                        channel: 'pos',
+                        delivery_method: deliveryMethod,
+                        delivery_fee: deliveryFee,
                         payment_gateway: paymentMethod,
                         walk_in: walkIn,
                         first_name: addressData.firstName,
@@ -633,6 +658,12 @@ export default function POSPage() {
                             <span>Tax (0%)</span>
                             <span>GH₵0.00</span>
                         </div>
+                        {deliveryFee > 0 && (
+                            <div className="flex justify-between text-gray-600">
+                                <span>{deliveryMethodLabel(deliveryMethod)}</span>
+                                <span>GH₵{deliveryFee.toFixed(2)}</span>
+                            </div>
+                        )}
                         <div className="flex justify-between text-xl font-bold text-gray-900 pt-2 border-t border-gray-200 mt-2">
                             <span>Total</span>
                             <span>GH₵{grandTotal.toFixed(2)}</span>
@@ -749,6 +780,9 @@ export default function POSPage() {
                                     <div className="text-center py-4 bg-brand-soft rounded-xl border border-brand/30">
                                         <p className="text-sm text-brand uppercase tracking-wide font-semibold">Amount to Pay</p>
                                         <p className="text-4xl font-extrabold text-brand mt-1">GH₵{grandTotal.toFixed(2)}</p>
+                                        {deliveryFee > 0 && (
+                                            <p className="text-xs text-gray-600 mt-1">Includes {deliveryMethodLabel(deliveryMethod)} GH₵{deliveryFee.toFixed(2)}</p>
+                                        )}
                                     </div>
 
                                     {/* Customer Select */}
@@ -843,37 +877,36 @@ export default function POSPage() {
                                     {/* Delivery Method */}
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">Delivery Method</label>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <button
-                                                onClick={() => setDeliveryMethod('pickup')}
-                                                className={`p-3 rounded-lg border transition-all flex items-center space-x-3 ${deliveryMethod === 'pickup'
-                                                    ? 'border-brand bg-brand-soft ring-1 ring-brand'
-                                                    : 'border-gray-200 hover:border-gray-300'
-                                                    }`}
-                                            >
-                                                <i className={`ri-store-2-line text-xl ${deliveryMethod === 'pickup' ? 'text-brand' : 'text-gray-400'}`}></i>
-                                                <div className="text-left">
-                                                    <p className={`text-sm font-semibold ${deliveryMethod === 'pickup' ? 'text-brand' : 'text-gray-700'}`}>Store Pickup</p>
-                                                    <p className="text-xs text-gray-500">Customer picks up</p>
-                                                </div>
-                                            </button>
-                                            <button
-                                                onClick={() => setDeliveryMethod('doorstep')}
-                                                className={`p-3 rounded-lg border transition-all flex items-center space-x-3 ${deliveryMethod === 'doorstep'
-                                                    ? 'border-brand bg-brand-soft ring-1 ring-brand'
-                                                    : 'border-gray-200 hover:border-gray-300'
-                                                    }`}
-                                            >
-                                                <i className={`ri-truck-line text-xl ${deliveryMethod === 'doorstep' ? 'text-brand' : 'text-gray-400'}`}></i>
-                                                <div className="text-left">
-                                                    <p className={`text-sm font-semibold ${deliveryMethod === 'doorstep' ? 'text-brand' : 'text-gray-700'}`}>Doorstep Delivery</p>
-                                                    <p className="text-xs text-gray-500">Deliver to address</p>
-                                                </div>
-                                            </button>
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                            {([
+                                                { id: 'pickup', icon: 'ri-store-2-line', hint: 'Customer picks up' },
+                                                { id: 'delivery', icon: 'ri-truck-line', hint: 'Within Accra' },
+                                                { id: 'outside_accra', icon: 'ri-map-pin-range-line', hint: 'Other regions' },
+                                            ] as Array<{ id: DeliveryMethod; icon: string; hint: string }>).map((option) => {
+                                                const selected = deliveryMethod === option.id;
+                                                const fee = computeShipping(cartTotal, option.id, deliveryRates);
+                                                return (
+                                                    <button
+                                                        key={option.id}
+                                                        type="button"
+                                                        onClick={() => setDeliveryMethod(option.id)}
+                                                        className={`p-3 rounded-lg border transition-all flex items-center space-x-3 ${selected
+                                                            ? 'border-brand bg-brand-soft ring-1 ring-brand'
+                                                            : 'border-gray-200 hover:border-gray-300'
+                                                            }`}
+                                                    >
+                                                        <i className={`${option.icon} text-xl ${selected ? 'text-brand' : 'text-gray-400'}`}></i>
+                                                        <div className="text-left">
+                                                            <p className={`text-sm font-semibold ${selected ? 'text-brand' : 'text-gray-700'}`}>{deliveryMethodLabel(option.id)}</p>
+                                                            <p className="text-xs text-gray-500">{option.hint} · {fee > 0 ? `GH₵${fee.toFixed(2)}` : 'Free'}</p>
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
                                         </div>
 
-                                        {/* Delivery Address (shown for doorstep delivery) */}
-                                        {deliveryMethod === 'doorstep' && (
+                                        {/* Delivery Address (shown for any delivery) */}
+                                        {deliveryMethod !== 'pickup' && (
                                             <div className="mt-3 bg-brand-soft p-4 rounded-lg border border-brand/30 space-y-3">
                                                 <h4 className="text-sm font-bold text-gray-900 flex items-center">
                                                     <i className="ri-map-pin-line mr-2 text-brand"></i>

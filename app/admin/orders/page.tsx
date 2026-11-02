@@ -6,6 +6,17 @@ import { supabase } from '@/lib/supabase';
 import { adminFetch } from '@/lib/admin-fetch';
 import ProductSalesStats from './ProductSalesStats';
 import { depositPlanLabel, isDepositPlan } from '@/lib/payments/plans';
+import { deliveryMethodLabel, orderChannel, orderChannelLabel, parseDeliveryMethod, type DeliveryMethod, type OrderChannel } from '@/lib/shipping';
+
+const DELIVERY_FILTERS: Array<{ id: DeliveryMethod; label: string }> = [
+  { id: 'pickup', label: 'Store Pickup' },
+  { id: 'delivery', label: 'Doorstep Delivery' },
+  { id: 'outside_accra', label: 'Outside Accra Delivery' },
+];
+
+/** Which delivery option the customer chose (handles the old POS value `doorstep`). */
+const orderDelivery = (order: { shipping_method?: string | null; metadata?: any }): DeliveryMethod =>
+  parseDeliveryMethod(order.shipping_method || order.metadata?.delivery_method);
 
 /** Money has been received (full or deposit). One predicate for tabs, counts and bulk actions. */
 const isPaidLike = (o: { payment_status?: string }) =>
@@ -20,6 +31,7 @@ interface Order {
   order_number: string;
   email: string;
   total: number;
+  shipping_total?: number | null;
   status: string;
   payment_status: string;
   payment_method: string;
@@ -73,7 +85,8 @@ export default function AdminOrdersPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
-  const [shippingMethodFilter, setShippingMethodFilter] = useState('all');
+  const [shippingMethodFilter, setShippingMethodFilter] = useState<'all' | DeliveryMethod>('all');
+  const [channelFilter, setChannelFilter] = useState<'all' | OrderChannel>('all');
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [bulkWorking, setBulkWorking] = useState(false);
 
@@ -93,6 +106,7 @@ export default function AdminOrdersPage() {
           order_number,
           email,
           total,
+          shipping_total,
           status,
           payment_status,
           payment_plan,
@@ -245,7 +259,7 @@ export default function AdminOrdersPage() {
 
   const ordersCsv = (list: Order[]) =>
     toCsv([
-      ['Order ID', 'Customer', 'Email', 'Date', 'Items', 'Total', 'Status', 'Payment Status', 'Payment Method'],
+      ['Order ID', 'Customer', 'Email', 'Date', 'Items', 'Total', 'Delivery Fee', 'Channel', 'Delivery Method', 'Status', 'Payment Status', 'Payment Method'],
       ...list.map((o) => [
         o.order_number || o.id,
         getCustomerName(o),
@@ -253,6 +267,9 @@ export default function AdminOrdersPage() {
         formatDate(o.created_at),
         getItemCount(o),
         Number(o.total || 0).toFixed(2),
+        Number(o.shipping_total || 0).toFixed(2),
+        orderChannelLabel(o),
+        deliveryMethodLabel(orderDelivery(o)),
         o.status,
         o.payment_status,
         o.payment_method || 'N/A',
@@ -378,12 +395,11 @@ export default function AdminOrdersPage() {
       const matchesPayment = paymentMethodFilter === 'all' ||
         normalizeMethod(order.payment_method) === paymentMethodFilter ||
         normalizeMethod(order.metadata?.payment_gateway) === paymentMethodFilter;
-      const matchesShipping = shippingMethodFilter === 'all' ||
-        normalizeMethod(order.shipping_method) === shippingMethodFilter ||
-        normalizeMethod(order.metadata?.delivery_method) === shippingMethodFilter;
+      const matchesShipping = shippingMethodFilter === 'all' || orderDelivery(order) === shippingMethodFilter;
+      const matchesChannel = channelFilter === 'all' || orderChannel(order) === channelFilter;
 
       return matchesViewTab && matchesSearch && matchesStatus && matchesProduct &&
-        matchesFrom && matchesTo && matchesPayment && matchesShipping;
+        matchesFrom && matchesTo && matchesPayment && matchesShipping && matchesChannel;
     })
     .sort((a, b) => {
       if (sortBy === 'total') return Number(b.total || 0) - Number(a.total || 0);
@@ -400,15 +416,27 @@ export default function AdminOrdersPage() {
         .map((m) => normalizeMethod(m))
     )
   ).sort();
-  const shippingMethodOptions = Array.from(
-    new Set(
-      orders
-        .flatMap((o) => [o.shipping_method, o.metadata?.delivery_method])
-        .filter(Boolean)
-        .map((m) => normalizeMethod(m))
-    )
-  ).sort();
   const methodLabel = (m: string) => m.charAt(0).toUpperCase() + m.slice(1);
+
+  // Channel / delivery breakdown for the current tab (before the other filters), so the
+  // admin sees at a glance how orders are coming in.
+  const tabOrders = orders.filter((o) => (orderViewTab === 'confirmed' ? isPaidLike(o) : !isPaidLike(o)));
+  const countBy = <T extends string>(fn: (o: Order) => T) =>
+    tabOrders.reduce<Record<string, number>>((acc, o) => {
+      const k = fn(o);
+      acc[k] = (acc[k] || 0) + 1;
+      return acc;
+    }, {});
+  const channelCounts = countBy(orderChannel);
+  const deliveryCounts = countBy(orderDelivery);
+  const chipClass = (active: boolean, tone: 'blue' | 'purple' | 'gray') => {
+    const tones = {
+      blue: active ? 'bg-blue-600 text-white border-blue-600' : 'bg-blue-50 text-blue-700 border-blue-200 hover:border-blue-400',
+      purple: active ? 'bg-purple-600 text-white border-purple-600' : 'bg-purple-50 text-purple-700 border-purple-200 hover:border-purple-400',
+      gray: active ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400',
+    };
+    return `px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors cursor-pointer whitespace-nowrap ${tones[tone]}`;
+  };
 
   return (
     <div className="space-y-6">
@@ -504,6 +532,27 @@ export default function AdminOrdersPage() {
       )}
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-6">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 mr-1">Channel</span>
+            <button onClick={() => setChannelFilter('all')} className={chipClass(channelFilter === 'all', 'gray')}>All ({tabOrders.length})</button>
+            <button onClick={() => setChannelFilter('web')} className={chipClass(channelFilter === 'web', 'blue')}>
+              <i className="ri-global-line mr-1"></i>Web ({channelCounts.web || 0})
+            </button>
+            <button onClick={() => setChannelFilter('pos')} className={chipClass(channelFilter === 'pos', 'purple')}>
+              <i className="ri-store-3-line mr-1"></i>POS ({channelCounts.pos || 0})
+            </button>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 mr-1">Delivery</span>
+            <button onClick={() => setShippingMethodFilter('all')} className={chipClass(shippingMethodFilter === 'all', 'gray')}>All</button>
+            {DELIVERY_FILTERS.map((d) => (
+              <button key={d.id} onClick={() => setShippingMethodFilter(d.id)} className={chipClass(shippingMethodFilter === d.id, 'gray')}>
+                {d.label} ({deliveryCounts[d.id] || 0})
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="p-6 border-b border-gray-200">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
             <div className="flex-1 max-w-md">
@@ -584,22 +633,22 @@ export default function AdminOrdersPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Shipping Method</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Delivery Method</label>
                 <select
                   value={shippingMethodFilter}
-                  onChange={(e) => setShippingMethodFilter(e.target.value)}
+                  onChange={(e) => setShippingMethodFilter(e.target.value as 'all' | DeliveryMethod)}
                   className="w-full px-3 py-2 pr-8 border-2 border-gray-300 rounded-lg text-sm cursor-pointer"
                 >
                   <option value="all">All Methods</option>
-                  {shippingMethodOptions.map((m) => (
-                    <option key={m} value={m}>{methodLabel(m)}</option>
+                  {DELIVERY_FILTERS.map((d) => (
+                    <option key={d.id} value={d.id}>{d.label}</option>
                   ))}
                 </select>
               </div>
-              {(dateFrom || dateTo || paymentMethodFilter !== 'all' || shippingMethodFilter !== 'all') && (
+              {(dateFrom || dateTo || paymentMethodFilter !== 'all' || shippingMethodFilter !== 'all' || channelFilter !== 'all') && (
                 <div className="md:col-span-4">
                   <button
-                    onClick={() => { setDateFrom(''); setDateTo(''); setPaymentMethodFilter('all'); setShippingMethodFilter('all'); }}
+                    onClick={() => { setDateFrom(''); setDateTo(''); setPaymentMethodFilter('all'); setShippingMethodFilter('all'); setChannelFilter('all'); }}
                     className="text-sm text-brand font-medium hover:underline cursor-pointer"
                   >
                     Clear filters
@@ -657,6 +706,7 @@ export default function AdminOrdersPage() {
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Customer</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Date</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Items</th>
+                <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Channel / Delivery</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Total</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Payment</th>
                 <th className="text-left py-4 px-4 text-sm font-semibold text-gray-700">Status</th>
@@ -666,14 +716,14 @@ export default function AdminOrdersPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-gray-500">
+                  <td colSpan={10} className="py-12 text-center text-gray-500">
                     <i className="ri-loader-4-line animate-spin text-3xl text-brand"></i>
                     <p className="mt-2">Loading orders...</p>
                   </td>
                 </tr>
               ) : filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-gray-500">
+                  <td colSpan={10} className="py-12 text-center text-gray-500">
                     <i className="ri-inbox-line text-4xl text-gray-300"></i>
                     <p className="mt-2">No orders found</p>
                     <p className="text-sm">Orders will appear here when customers place them</p>
@@ -708,6 +758,21 @@ export default function AdminOrdersPage() {
                     </td>
                     <td className="py-4 px-4 text-gray-700 text-sm whitespace-nowrap">{formatDate(order.created_at)}</td>
                     <td className="py-4 px-4 text-gray-700">{getItemCount(order)}</td>
+                    <td className="py-4 px-4 whitespace-nowrap">
+                      <div className="flex flex-col items-start gap-1">
+                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${orderChannel(order) === 'pos' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                          <i className={`${orderChannel(order) === 'pos' ? 'ri-store-3-line' : 'ri-global-line'} mr-1`}></i>
+                          {orderChannelLabel(order)}
+                        </span>
+                        <span className="text-xs text-gray-700">
+                          <i className={`${orderDelivery(order) === 'pickup' ? 'ri-store-2-line' : orderDelivery(order) === 'outside_accra' ? 'ri-map-pin-range-line' : 'ri-truck-line'} mr-1 text-gray-400`}></i>
+                          {deliveryMethodLabel(orderDelivery(order))}
+                          {Number(order.shipping_total || 0) > 0 && (
+                            <span className="text-gray-400"> · GH₵ {Number(order.shipping_total).toFixed(2)}</span>
+                          )}
+                        </span>
+                      </div>
+                    </td>
                     <td className="py-4 px-4 font-semibold text-gray-900 whitespace-nowrap">
                       <div>GH₵ {order.total?.toFixed(2) || '0.00'}</div>
                       {order.payment_status === 'partially_paid' && (

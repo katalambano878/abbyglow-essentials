@@ -94,12 +94,16 @@ const nextConfig: NextConfig = {
         ]
       },
       // Cache static assets (JS, CSS, fonts) for 1 year (they have content hashes)
-      {
-        source: '/_next/static/:path*',
-        headers: [
-          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }
-        ]
-      },
+      // Production chunk names are content-hashed, so they can be cached forever. Dev
+      // chunks are not, and marking them immutable makes browsers run stale code.
+      ...(process.env.NODE_ENV === 'production'
+        ? [
+            {
+              source: '/_next/static/:path*',
+              headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
+            },
+          ]
+        : []),
       // Cache optimized images for 30 days
       {
         source: '/_next/image',

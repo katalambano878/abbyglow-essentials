@@ -2,6 +2,7 @@
 'use client';
 
 import Link from 'next/link';
+import { deliveryMethodLabel, isDeliveryMethod } from '@/lib/shipping';
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
@@ -281,7 +282,8 @@ function OrderTrackingContent() {
   const paymentBadge = getPaymentBadge();
   const trackingNumber = order.metadata?.tracking_number || order.tracking_number || '';
   const shippingAddress = order.shipping_address || {};
-  const isDeliveryOrder = (order.shipping_method || order.metadata?.delivery_method) === 'delivery';
+  const deliveryMethod = order.shipping_method || order.metadata?.delivery_method || 'pickup';
+  const isDeliveryOrder = isDeliveryMethod(deliveryMethod);
   const hasPreorderItem = Array.isArray(order.order_items) && order.order_items.some((item: any) => item?.metadata?.is_preorder === true);
   const isClosed = order.status === 'cancelled' || order.status === 'refunded' || order.status === 'delivered';
   const estimatedDelivery = isDeliveryOrder && !hasPreorderItem && !isClosed
@@ -353,7 +355,7 @@ function OrderTrackingContent() {
                   <i className="ri-map-pin-line text-xl text-brand"></i>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-600">{isDeliveryOrder ? 'Delivering To' : 'Store Pickup'}</p>
+                  <p className="text-sm text-gray-600">{deliveryMethodLabel(deliveryMethod)}</p>
                   <p className="font-semibold text-gray-900">
                     {isDeliveryOrder ? (shippingAddress.city || shippingAddress.region || 'Ghana') : 'Collect in store'}
                   </p>

@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import FraudDetectionAlert from '@/components/FraudDetectionAlert';
 import { depositPlanLabel, isDepositPlan } from '@/lib/payments/plans';
+import { deliveryMethodLabel, isDeliveryMethod, orderChannelLabel } from '@/lib/shipping';
 
 interface OrderDetailClientProps {
   orderId: string;
@@ -478,7 +479,8 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
           {/* Order Summary */}
           <div className="flex justify-between mb-6">
             <div>
-              <p><span className="font-semibold">Shipping Method:</span> {order?.shipping_method || 'Standard'}</p>
+              <p><span className="font-semibold">Delivery:</span> {deliveryMethodLabel(order?.shipping_method || order?.metadata?.delivery_method)}</p>
+              <p><span className="font-semibold">Channel:</span> {orderChannelLabel(order)}</p>
               <p><span className="font-semibold">Payment:</span> {order?.payment_method} ({order?.payment_status})</p>
               {trackingNumber && <p><span className="font-semibold">Tracking #:</span> {trackingNumber}</p>}
             </div>
@@ -629,12 +631,12 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
                   <span>Total</span>
                   <span>GH₵ {order.total?.toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between text-gray-700">
-                  <span>Plan</span>
-                  <span className="font-semibold">
-                    {isDepositPlan(order.payment_plan) ? depositPlanLabel() : 'Full payment'}
-                  </span>
-                </div>
+                {isDepositPlan(order.payment_plan) && (
+                  <div className="flex justify-between text-gray-700">
+                    <span>Plan</span>
+                    <span className="font-semibold">{depositPlanLabel()}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-gray-700">
                   <span>Amount paid</span>
                   <span className="font-semibold text-brand">
@@ -744,7 +746,24 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h2 className="text-lg font-bold text-gray-900 mb-4">Shipping Address</h2>
+              <h2 className="text-lg font-bold text-gray-900 mb-4">Delivery</h2>
+              <div className="space-y-2 mb-4">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Method</span>
+                  <span className="font-semibold text-gray-900">{deliveryMethodLabel(order.shipping_method || order.metadata?.delivery_method)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Delivery fee</span>
+                  <span className="font-semibold text-gray-900">{Number(order.shipping_total || 0) > 0 ? `GH₵ ${Number(order.shipping_total).toFixed(2)}` : 'Free'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Channel</span>
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${orderChannelLabel(order) === 'POS' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                    {orderChannelLabel(order)}
+                  </span>
+                </div>
+              </div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">{isDeliveryMethod(order.shipping_method || order.metadata?.delivery_method) ? 'Deliver to' : 'Customer address'}</h3>
               <div className="text-gray-700 space-y-1">
                 {/* Support both old field names (address_line1) and new (address) */}
                 <p>{shippingAddress.address || shippingAddress.address_line1}</p>
@@ -765,12 +784,12 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
                   <span className="text-gray-600">Method</span>
                   <span className="font-semibold text-gray-900 capitalize">{order.payment_method}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Plan</span>
-                  <span className="font-semibold text-gray-900">
-                    {isDepositPlan(order.payment_plan) ? depositPlanLabel() : 'Full'}
-                  </span>
-                </div>
+                {isDepositPlan(order.payment_plan) && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Plan</span>
+                    <span className="font-semibold text-gray-900">{depositPlanLabel()}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-gray-600">Status</span>
                   <span className="px-3 py-1 bg-brand-soft text-brand rounded-full text-sm font-semibold whitespace-nowrap capitalize">

@@ -89,3 +89,26 @@ Against a fresh local Postgres (`abbyglow_dev`): ACL denials, embed block, role 
 attempts, signup/login throttling, logout, recovery-token exchange (single use), server
 checkout with coupon + delivery, masked vs verified success lookup, Moolre callback amount
 mismatch / success / replay (stock reduced once), staff upsert, storage upload limits.
+
+## Delivery methods, fees and order channel (2026-11-02)
+
+- **Three delivery methods:** `pickup` (free), `delivery` (doorstep within Accra) and
+  `outside_accra` (courier to other regions). `lib/shipping.ts` is the single source of truth
+  (labels, parsing of the old POS value `doorstep`, fee calculation, order channel helpers).
+- **Fees are admin-editable** at Admin → Delivery Fees (`/admin/delivery`, admin role only),
+  stored in `store_settings.delivery_rates` and served to the storefront by
+  `GET /api/storefront/delivery-rates`. Checkout, POS, the server checkout, emails and the
+  Shipping info page all read the same numbers. Migration `20261102000000_delivery_rates_setting.sql`
+  seeds GH₵ 25 (Accra) / GH₵ 50 (outside Accra) / no free threshold — **the owner should set the
+  real amounts in the admin.** Coupons with free shipping still remove the fee.
+- **Orders record how they came in:** `metadata.channel` is `web` or `pos`
+  (older orders fall back to `checkout_source`), `shipping_method` holds the delivery method and
+  `shipping_total` the fee. Admin → Orders has Channel (Web / POS) and Delivery chips with counts,
+  a Channel / Delivery column, matching filters and CSV columns; the order detail shows method,
+  fee and channel. Customers see the method and fee on My Orders, the order tracking page, the
+  order success page and in their emails.
+- **Payment plan removed from checkout.** The store takes full payment only, so the
+  "Payment Plan / Full Payment" step is gone and the API ignores any `paymentPlan` sent by a
+  client. The DB columns stay for historical deposit orders, and those still show their plan.
+- **Dev fix:** the one-year `immutable` cache header on `/_next/static` now applies to production
+  builds only; in `next dev` it made browsers keep running stale chunks.

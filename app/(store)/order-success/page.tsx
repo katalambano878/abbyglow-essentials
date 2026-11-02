@@ -2,6 +2,7 @@
 'use client';
 
 import Link from 'next/link';
+import { deliveryMethodLabel, isDeliveryMethod } from '@/lib/shipping';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState, useEffect } from 'react';
 import { depositPlanLabel, isDepositPlan } from '@/lib/payments/plans';
@@ -134,7 +135,7 @@ function OrderSuccessContent() {
   const discountTotal = Number(order.discount_total || 0);
   const shippingTotal = Number(order.shipping_total || 0);
   const deliveryMethod = order.shipping_method || order.metadata?.delivery_method || 'pickup';
-  const isDelivery = deliveryMethod === 'delivery';
+  const isDelivery = isDeliveryMethod(deliveryMethod);
   const hasPreorder = items.some((item) => item?.metadata?.is_preorder === true);
   const orderDate = new Date(order.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   const estimatedDelivery = isDelivery && !hasPreorder && paid
@@ -379,7 +380,7 @@ function OrderSuccessContent() {
 
             {verified && (
               <div className="bg-white rounded-xl shadow-sm p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-4">{isDelivery ? 'Delivery Details' : 'Pickup Details'}</h2>
+                <h2 className="text-xl font-bold text-gray-900 mb-4">{deliveryMethodLabel(deliveryMethod)} Details</h2>
                 <div className="space-y-3">
                   {order.shipping_address && (
                     <>

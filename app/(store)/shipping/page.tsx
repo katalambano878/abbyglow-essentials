@@ -1,24 +1,31 @@
 import Link from 'next/link';
-import { DELIVERY_FEE, FREE_DELIVERY_THRESHOLD } from '@/lib/shipping';
+import { getDeliveryRates } from '@/lib/shipping-server';
 
-export default function ShippingPage() {
-  // Same numbers the checkout charges (lib/shipping.ts), so this page never promises a different fee.
-  const deliveryCost =
-    DELIVERY_FEE > 0 ? `GHS ${DELIVERY_FEE.toFixed(2)}` : 'FREE';
+// Fees come from the admin's Delivery Fees settings, so this page never promises a different number.
+export const dynamic = 'force-dynamic';
+
+export default async function ShippingPage() {
+  const rates = await getDeliveryRates();
+  const fee = (n: number) => (n > 0 ? `GHS ${n.toFixed(2)}` : 'FREE');
   const freeDeliveryNote =
-    DELIVERY_FEE > 0 && FREE_DELIVERY_THRESHOLD > 0
-      ? `Free delivery on orders over GHS ${FREE_DELIVERY_THRESHOLD.toFixed(0)}.`
-      : DELIVERY_FEE > 0
-        ? 'The delivery fee is shown at checkout before you pay.'
-        : 'Delivery is currently free on every order.';
+    rates.freeThreshold > 0
+      ? `Free delivery on orders of GHS ${rates.freeThreshold.toFixed(0)} or more.`
+      : 'The delivery fee is shown at checkout before you pay.';
 
   const deliveryOptions = [
     {
-      type: 'Home Delivery',
-      time: '1-3 Business Days in Accra',
-      cost: deliveryCost,
-      description: 'Rider delivery to your door; 3-7 business days outside Greater Accra',
+      type: 'Doorstep Delivery (Accra)',
+      time: '1-3 Business Days',
+      cost: fee(rates.accra),
+      description: 'Rider delivery to your door anywhere in Accra',
       icon: 'ri-truck-line'
+    },
+    {
+      type: 'Outside Accra Delivery',
+      time: '3-7 Business Days',
+      cost: fee(rates.outsideAccra),
+      description: 'Courier delivery to every other region in Ghana',
+      icon: 'ri-map-pin-range-line'
     },
     {
       type: 'Store Pickup',

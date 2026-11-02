@@ -3,10 +3,11 @@ import { supabaseAdmin } from '@/lib/supabase-admin';
 import { checkRateLimit, getClientIdentifier } from '@/lib/rate-limit';
 import { verifyAccessToken } from '@/lib/db/auth';
 import { isPlainPostgres } from '@/lib/db/mode';
-import { computePaymentPlan, type PaymentPlan } from '@/lib/payments/plans';
+import { computePaymentPlan } from '@/lib/payments/plans';
 import { isGatewayConfigured, parseGateway } from '@/lib/payments/gateways';
 import { getPreorderShippingNote, isPreorderProduct } from '@/lib/preorder';
 import { computeShipping, parseDeliveryMethod } from '@/lib/shipping';
+import { getDeliveryRates } from '@/lib/shipping-server';
 import { recordCouponUse, validateCoupon } from '@/lib/coupons';
 import { generateOrderNumber, generateTrackingNumber } from '@/lib/order-number';
 
@@ -58,7 +59,6 @@ export async function POST(req: Request) {
     const region = String(shipping.region || '').trim();
     const deliveryMethod = parseDeliveryMethod(body.deliveryMethod);
     const couponCode = typeof body.couponCode === 'string' ? body.couponCode.trim() : '';
-    const paymentPlanRaw = String(body.paymentPlan || 'full');
     const paymentGateway = parseGateway(body.paymentGateway || body.paymentMethod);
     if (!paymentGateway || !isGatewayConfigured(paymentGateway)) {
       return NextResponse.json(
@@ -228,13 +228,12 @@ export async function POST(req: Request) {
     }
 
     const discountedSubtotal = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
-    const shippingCost = couponFreeShipping ? 0 : computeShipping(discountedSubtotal, deliveryMethod);
+    const deliveryRates = await getDeliveryRates();
+    const shippingCost = couponFreeShipping ? 0 : computeShipping(discountedSubtotal, deliveryMethod, deliveryRates);
     const tax = 0;
     const total = Math.round((discountedSubtotal + shippingCost + tax) * 100) / 100;
-    const cartHasPreorder = lineRows.some((line) => line.metadata.is_preorder === true);
-    const paymentPlan: PaymentPlan =
-      paymentPlanRaw === 'deposit_50' && cartHasPreorder ? 'deposit_50' : 'full';
-    const planBreakdown = computePaymentPlan(total, paymentPlan);
+    // The store takes full payment only; the plan columns stay for historical deposit orders.
+    const planBreakdown = computePaymentPlan(total, 'full');
 
     const orderNumber = generateOrderNumber();
     const trackingNumber = generateTrackingNumber();
@@ -280,9 +279,11 @@ export async function POST(req: Request) {
             last_name: lastName,
             tracking_number: trackingNumber,
             checkout_source: 'server_checkout',
+            channel: 'web',
             payment_gateway: paymentGateway,
             payment_plan: planBreakdown.plan,
             delivery_method: deliveryMethod,
+            delivery_fee: shippingCost,
             coupon_code: couponApplied,
             coupon_discount: discount,
           },

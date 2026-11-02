@@ -15,9 +15,15 @@ import { useCart } from '@/context/CartContext';
 import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useRecaptcha } from '@/hooks/useRecaptcha';
-import { isPreorderProduct } from '@/lib/preorder';
-import { computePaymentPlan, depositPlanLabel, DEPOSIT_PERCENT } from '@/lib/payments/plans';
-import { computeShipping, shippingLabel, type DeliveryMethod } from '@/lib/shipping';
+import {
+  computeShipping,
+  deliveryMethodHint,
+  DEFAULT_DELIVERY_RATES,
+  normalizeDeliveryRates,
+  shippingLabel,
+  type DeliveryMethod,
+  type DeliveryRates,
+} from '@/lib/shipping';
 
 const CHECKOUT_EMAIL_KEY = 'abbyglow_checkout_email';
 
@@ -55,7 +61,6 @@ export default function CheckoutPage() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [user, setUser] = useState<any>(null);
-  const [preorderByProductId, setPreorderByProductId] = useState<Record<string, boolean>>({});
   const { getToken, verifying } = useRecaptcha();
 
   const [shippingData, setShippingData] = useState({
@@ -90,7 +95,7 @@ export default function CheckoutPage() {
   ];
 
   const [deliveryMethod, setDeliveryMethod] = useState<DeliveryMethod>('pickup');
-  const [paymentPlan, setPaymentPlan] = useState<'full' | 'deposit_50'>('full');
+  const [deliveryRates, setDeliveryRates] = useState<DeliveryRates>(DEFAULT_DELIVERY_RATES);
   const [paymentGateway, setPaymentGateway] = useState<'moolre' | 'hubtel' | ''>('');
   const [gateways, setGateways] = useState<Array<{ id: 'moolre' | 'hubtel'; label: string; configured: boolean }>>([]);
   const [errors, setErrors] = useState<any>({});
@@ -103,10 +108,6 @@ export default function CheckoutPage() {
 
   // Order created but the server total differs from what was displayed: confirm before paying
   const [pendingOrder, setPendingOrder] = useState<CreatedOrder | null>(null);
-
-  const cartHasPreorder = cart.some(
-    (item) => item.isPreorder === true || preorderByProductId[item.id] === true
-  );
 
   // Check auth
   useEffect(() => {
@@ -140,40 +141,27 @@ export default function CheckoutPage() {
       .catch((err) => console.error('Failed to load payment gateways:', err));
   }, []);
 
-  // Resolve pre-order flags from DB (covers older cart items without isPreorder)
-  useEffect(() => {
-    const ids = [...new Set(cart.map((item) => item.id).filter(Boolean))];
-    if (ids.length === 0) {
-      setPreorderByProductId({});
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const { data } = await supabase.from('products').select('id, metadata').in('id', ids);
-      if (cancelled || !data) return;
-      const map: Record<string, boolean> = {};
-      for (const row of data as Array<{ id: string; metadata?: unknown }>) {
-        map[row.id] = isPreorderProduct(row.metadata as any);
-      }
-      setPreorderByProductId(map);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [cart]);
-
   // Calculate Totals (same helpers as the server)
   const subtotal = cartSubtotal;
   const couponDiscount = Math.min(appliedCoupon?.discount || 0, subtotal);
   const discountedSubtotal = Math.max(0, Math.round((subtotal - couponDiscount) * 100) / 100);
-  const shippingCost = appliedCoupon?.freeShipping ? 0 : computeShipping(discountedSubtotal, deliveryMethod);
+  const shippingCost = appliedCoupon?.freeShipping ? 0 : computeShipping(discountedSubtotal, deliveryMethod, deliveryRates);
   const tax = 0; // No Tax
   const total = Math.round((discountedSubtotal + shippingCost + tax) * 100) / 100;
-  const effectivePlan = cartHasPreorder ? paymentPlan : 'full';
-  const planBreakdown = computePaymentPlan(total, effectivePlan);
-  const amountDueNow = planBreakdown.amountDueNow;
-  const balanceDue = planBreakdown.balanceDue;
-  const deliveryFeePreview = computeShipping(discountedSubtotal, 'delivery');
+  const feePreview = (method: DeliveryMethod) =>
+    appliedCoupon?.freeShipping ? 0 : computeShipping(discountedSubtotal, method, deliveryRates);
+
+  // Delivery fees come from the admin's settings; the server charges the same numbers.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/storefront/delivery-rates')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (!cancelled && json?.rates) setDeliveryRates(normalizeDeliveryRates(json.rates));
+      })
+      .catch(() => { /* keep defaults */ });
+    return () => { cancelled = true; };
+  }, []);
 
   // Re-validate the stored / applied coupon against the current subtotal + email
   useEffect(() => {
@@ -200,12 +188,6 @@ export default function CheckoutPage() {
       cancelled = true;
     };
   }, [subtotal, shippingData.email, appliedCoupon?.code, pendingOrder]);
-
-  useEffect(() => {
-    if (!cartHasPreorder && paymentPlan === 'deposit_50') {
-      setPaymentPlan('full');
-    }
-  }, [cartHasPreorder, paymentPlan]);
 
   const applyCoupon = (coupon: AppliedCoupon) => {
     const email = /\S+@\S+\.\S+/.test(shippingData.email) ? shippingData.email.trim().toLowerCase() : '';
@@ -314,7 +296,6 @@ export default function CheckoutPage() {
           })),
           shipping: shippingData,
           deliveryMethod,
-          paymentPlan: effectivePlan,
           paymentGateway,
           couponCode: appliedCoupon?.code || undefined,
         }),
@@ -348,7 +329,7 @@ export default function CheckoutPage() {
       clearCart();
 
       const serverAmount = Number(order.amount_due_now ?? order.total ?? 0);
-      if (Math.abs(serverAmount - amountDueNow) > 0.01) {
+      if (Math.abs(serverAmount - total) > 0.01) {
         // Show the server's figure and let the customer confirm before paying.
         setPendingOrder(order);
         return;
@@ -395,7 +376,7 @@ export default function CheckoutPage() {
             <div className="space-y-3 mb-6 text-sm">
               <div className="flex justify-between text-gray-600">
                 <span>Displayed amount</span>
-                <span className="line-through">GH₵ {amountDueNow.toFixed(2)}</span>
+                <span className="line-through">GH₵ {total.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-gray-700">
                 <span>Subtotal</span>
@@ -630,47 +611,46 @@ export default function CheckoutPage() {
                 <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
                   <h2 className="text-xl font-bold text-gray-900 mb-6">Delivery Method</h2>
                   <div className="space-y-4">
-                    <label className={`flex items-center justify-between p-4 border-2 rounded-lg cursor-pointer transition-colors ${deliveryMethod === 'pickup' ? 'border-brand bg-brand-soft' : 'border-gray-300 hover:border-gray-400'
-                      }`}>
-                      <div className="flex items-center space-x-4">
-                        <input
-                          type="radio"
-                          name="delivery"
-                          value="pickup"
-                          checked={deliveryMethod === 'pickup'}
-                          onChange={() => setDeliveryMethod('pickup')}
-                          className="w-5 h-5 text-brand"
-                        />
-                        <div>
-                          <p className="font-semibold text-gray-900">Store Pickup</p>
-                          <p className="text-sm text-gray-600">Pick up from our store — Ready in 24 hours</p>
-                        </div>
-                      </div>
-                      <p className="font-bold text-brand">FREE</p>
-                    </label>
-
-                    <label className={`flex items-center justify-between p-4 border-2 rounded-lg cursor-pointer transition-colors ${deliveryMethod === 'delivery' ? 'border-brand bg-brand-soft' : 'border-gray-300 hover:border-gray-400'
-                      }`}>
-                      <div className="flex items-center space-x-4">
-                        <input
-                          type="radio"
-                          name="delivery"
-                          value="delivery"
-                          checked={deliveryMethod === 'delivery'}
-                          onChange={() => setDeliveryMethod('delivery')}
-                          className="w-5 h-5 text-brand"
-                        />
-                        <div>
-                          <p className="font-semibold text-gray-900">Doorstep Delivery</p>
-                          <p className="text-sm text-gray-600">
-                            Delivered to {shippingData.city || 'your address'}{shippingData.region ? `, ${shippingData.region}` : ''}
+                    {([
+                      { id: 'pickup', title: 'Store Pickup', hint: deliveryMethodHint('pickup') },
+                      {
+                        id: 'delivery',
+                        title: 'Doorstep Delivery (Accra)',
+                        hint: `${deliveryMethodHint('delivery')} — to ${shippingData.city || 'your address'}`,
+                      },
+                      {
+                        id: 'outside_accra',
+                        title: 'Outside Accra Delivery',
+                        hint: `${deliveryMethodHint('outside_accra')}${shippingData.region ? ` — ${shippingData.region}` : ''}`,
+                      },
+                    ] as Array<{ id: DeliveryMethod; title: string; hint: string }>).map((option) => {
+                      const fee = feePreview(option.id);
+                      const selected = deliveryMethod === option.id;
+                      return (
+                        <label
+                          key={option.id}
+                          className={`flex items-center justify-between p-4 border-2 rounded-lg cursor-pointer transition-colors ${selected ? 'border-brand bg-brand-soft' : 'border-gray-300 hover:border-gray-400'}`}
+                        >
+                          <div className="flex items-center space-x-4">
+                            <input
+                              type="radio"
+                              name="delivery"
+                              value={option.id}
+                              checked={selected}
+                              onChange={() => setDeliveryMethod(option.id)}
+                              className="w-5 h-5 text-brand"
+                            />
+                            <div>
+                              <p className="font-semibold text-gray-900">{option.title}</p>
+                              <p className="text-sm text-gray-600">{option.hint}</p>
+                            </div>
+                          </div>
+                          <p className={`font-bold whitespace-nowrap ${fee > 0 ? 'text-gray-900' : 'text-brand'}`}>
+                            {fee > 0 ? `GH₵ ${fee.toFixed(2)}` : 'FREE'}
                           </p>
-                        </div>
-                      </div>
-                      <p className={`font-bold ${deliveryFeePreview > 0 && !appliedCoupon?.freeShipping ? 'text-gray-900' : 'text-brand'}`}>
-                        {appliedCoupon?.freeShipping ? 'FREE' : shippingLabel(deliveryFeePreview, 'delivery').replace('Free delivery', 'FREE')}
-                      </p>
-                    </label>
+                        </label>
+                      );
+                    })}
                   </div>
 
                   <div className="flex flex-col-reverse md:flex-row gap-4 mt-6">
@@ -696,63 +676,6 @@ export default function CheckoutPage() {
             {currentStep === 3 && (
               <>
                 <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-                  <h2 className="text-xl font-bold text-gray-900 mb-2">Payment Plan</h2>
-                  <p className="text-sm text-gray-600 mb-6">
-                    {cartHasPreorder
-                      ? `Your cart includes pre-order items. Pay in full now, or ${DEPOSIT_PERCENT}% now and the balance when goods arrive.`
-                      : 'Pay the full amount now for in-stock items available in Ghana.'}
-                  </p>
-                  <div className={`grid gap-4 mb-8 ${cartHasPreorder ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
-                    <button
-                      type="button"
-                      onClick={() => setPaymentPlan('full')}
-                      className={`p-5 rounded-xl border-2 transition-all text-left cursor-pointer ${
-                        effectivePlan === 'full'
-                          ? 'border-brand bg-brand-soft'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <h3 className="text-lg font-bold text-gray-900">Full Payment</h3>
-                        <div
-                          className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                            effectivePlan === 'full' ? 'border-brand bg-brand' : 'border-gray-300'
-                          }`}
-                        >
-                          {effectivePlan === 'full' && <i className="ri-check-line text-white text-xs"></i>}
-                        </div>
-                      </div>
-                      <p className="text-sm text-gray-600 mb-2">Pay the full amount now</p>
-                      <p className="text-xl font-bold text-brand">GH₵ {total.toFixed(2)}</p>
-                    </button>
-
-                    {cartHasPreorder && (
-                      <button
-                        type="button"
-                        onClick={() => setPaymentPlan('deposit_50')}
-                        className={`p-5 rounded-xl border-2 transition-all text-left cursor-pointer ${
-                          effectivePlan === 'deposit_50'
-                            ? 'border-brand bg-brand-soft'
-                            : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <h3 className="text-lg font-bold text-gray-900">{depositPlanLabel()}</h3>
-                          <div
-                            className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                              effectivePlan === 'deposit_50' ? 'border-brand bg-brand' : 'border-gray-300'
-                            }`}
-                          >
-                            {effectivePlan === 'deposit_50' && <i className="ri-check-line text-white text-xs"></i>}
-                          </div>
-                        </div>
-                        <p className="text-sm text-gray-600 mb-2">Pay {DEPOSIT_PERCENT}% now, rest when goods arrive</p>
-                        <p className="text-xl font-bold text-brand-accent">GH₵ {amountDueNow.toFixed(2)} now</p>
-                        <p className="text-sm text-gray-500 mt-1">Balance: GH₵ {balanceDue.toFixed(2)}</p>
-                      </button>
-                    )}
-                  </div>
-
                   <h2 className="text-xl font-bold text-gray-900 mb-4">Payment Method</h2>
                   {gateways.length === 0 ? (
                     <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg mb-6">
@@ -822,7 +745,7 @@ export default function CheckoutPage() {
                           Processing...
                         </>
                       ) : (
-                        <>Pay GH₵ {amountDueNow.toFixed(2)} Now</>
+                        <>Pay GH₵ {total.toFixed(2)} Now</>
                       )}
                     </button>
                   </div>
@@ -841,9 +764,6 @@ export default function CheckoutPage() {
               shippingText={shippingLabel(shippingCost, deliveryMethod)}
               tax={tax}
               total={total}
-              paymentPlan={currentStep >= 3 ? effectivePlan : undefined}
-              amountDueNow={currentStep >= 3 ? amountDueNow : undefined}
-              balanceDue={currentStep >= 3 ? balanceDue : undefined}
             >
               <AdvancedCouponSystem
                 subtotal={subtotal}
