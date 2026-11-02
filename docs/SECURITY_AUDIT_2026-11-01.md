@@ -13,9 +13,16 @@ This file records what was wrong, what changed, and what still needs the owner.
    longer rendered into page markup), optionally `RECAPTCHA_SECRET_KEY` +
    `NEXT_PUBLIC_RECAPTCHA_SITE_KEY` (sign-in/sign-up/reset are then verified server-side),
    `NEXT_PUBLIC_DELIVERY_FEE` / `NEXT_PUBLIC_FREE_DELIVERY_THRESHOLD` if delivery is charged.
-3. Apply the new SQL migrations to the production database (`supabase/migrations/2026110100*`):
+3. ~~Apply the new SQL migrations to the production database~~ **Done 2026-11-02** on
+   `store_abbyglow` (fleet-postgres, big-vps) and logged in `schema_migrations`:
    `apply_order_payment()` had an ambiguous column reference that made every gateway
    callback / verify fail with "Database update failed"; and a `newsletter_subscribers` table.
+5. **Rotate the big-vps sudo password.** It was hard-coded in `scripts/abbyglow-redeploy.sh`,
+   `scripts/abbyglow-fix-proxy.sh` and `scripts/abbyglow-debug-runtime.sh` (since 2026-09-02)
+   and is in the GitHub history. The scripts now read it from `SUDO_PASS` like the others.
+6. The GitHub push webhook did not queue a Coolify build for `abbyglow-app` on 2026-11-02;
+   the deploy was queued through the Coolify API instead. Check the GitHub App / webhook
+   wiring in Coolify if auto-deploy is expected.
 4. A copy of the old template appeared as `.env.local` on the dev machine during the audit
    (gitignored). Delete it or replace it with real local values.
 

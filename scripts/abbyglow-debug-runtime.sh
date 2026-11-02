@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
-printf '%s\n' PSAbt67t6NLU7I1oISVu | sudo -S true
+if [[ -n "${SUDO_PASS:-}" ]]; then
+  printf '%s\n' "$SUDO_PASS" | sudo -S -v >/dev/null 2>&1
+fi
 echo "== containers =="
 sudo docker ps -a | grep -i abbyglow || sudo docker ps -a | grep -i ctbyds || true
 NAME=$(sudo docker ps -a --format '{{.Names}}' | grep -i ctbyds | head -1)

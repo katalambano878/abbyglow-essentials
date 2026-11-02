@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
-printf '%s\n' PSAbt67t6NLU7I1oISVu | sudo -S true
+if [[ -n "${SUDO_PASS:-}" ]]; then
+  printf '%s\n' "$SUDO_PASS" | sudo -S -v >/dev/null 2>&1
+fi
 NAME=$(sudo docker ps --format '{{.Names}}' | grep -i ctbyds | head -1)
 echo "NAME=$NAME"
 echo "== networks =="

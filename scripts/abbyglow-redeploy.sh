@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' PSAbt67t6NLU7I1oISVu | sudo -S true
+if [[ -n "${SUDO_PASS:-}" ]]; then
+  printf '%s\n' "$SUDO_PASS" | sudo -S -v >/dev/null 2>&1
+fi
 TOKEN=$(tr -d '\r\n' </tmp/abbyglow-coolify.token)
 APP_UUID=$(tr -d '\r\n' </tmp/abbyglow-app.uuid)
 BASE="http://127.0.0.1:8000/api/v1"
