@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useEffect } from 'react';
 import { useCart } from '@/context/CartContext';
-import { DELIVERY_FEE } from '@/lib/shipping';
 
 const PLACEHOLDER_IMAGE = '/images/placeholder-product.svg';
 
@@ -140,7 +139,7 @@ export default function MiniCart({ isOpen, onClose }: MiniCartProps) {
               </div>
 
               <p className="text-[15px] text-[#6b7280] mb-6 text-center">
-                {DELIVERY_FEE > 0 ? 'Delivery calculated at checkout · free store pickup' : 'Free delivery or store pickup'}
+                Free store pickup · delivery fee confirmed after you order
               </p>
 
               <div className="space-y-3 flex flex-col items-center">

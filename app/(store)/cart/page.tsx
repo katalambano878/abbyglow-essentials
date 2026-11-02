@@ -12,7 +12,6 @@ import AdvancedCouponSystem, {
 import { useCart } from '@/context/CartContext';
 import PageHero from '@/components/PageHero';
 import { usePageTitle } from '@/hooks/usePageTitle';
-import { DELIVERY_FEE } from '@/lib/shipping';
 
 const PLACEHOLDER_IMAGE = '/images/placeholder-product.svg';
 
@@ -60,7 +59,7 @@ export default function CartPage() {
   };
 
   const couponDiscount = Math.min(appliedCoupon?.discount || 0, subtotal);
-  const shippingText = DELIVERY_FEE > 0 && !appliedCoupon?.freeShipping ? 'Calculated at checkout' : 'Free';
+  const shippingText = 'Chosen at checkout';
   const total = Math.max(subtotal - couponDiscount, 0);
 
   return (
@@ -207,9 +206,7 @@ export default function CartPage() {
                         <span>Total</span>
                         <span>GH₵{total.toFixed(2)}</span>
                       </div>
-                      {shippingText === 'Calculated at checkout' && (
-                        <p className="text-xs text-gray-500 mt-1">Delivery fee is added at checkout if you choose delivery.</p>
-                      )}
+                      <p className="text-xs text-gray-500 mt-1">Store pickup is free. If you choose delivery, our team confirms the fee with you after you order.</p>
                     </div>
 
                     <AdvancedCouponSystem

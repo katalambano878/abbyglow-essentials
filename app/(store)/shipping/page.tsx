@@ -1,30 +1,22 @@
 import Link from 'next/link';
-import { getDeliveryRates } from '@/lib/shipping-server';
 
-// Fees come from the admin's Delivery Fees settings, so this page never promises a different number.
-export const dynamic = 'force-dynamic';
-
-export default async function ShippingPage() {
-  const rates = await getDeliveryRates();
-  const fee = (n: number) => (n > 0 ? `GHS ${n.toFixed(2)}` : 'FREE');
-  const freeDeliveryNote =
-    rates.freeThreshold > 0
-      ? `Free delivery on orders of GHS ${rates.freeThreshold.toFixed(0)} or more.`
-      : 'The delivery fee is shown at checkout before you pay.';
+export default function ShippingPage() {
+  const feeNote =
+    'Delivery comes at a fee that our team confirms with you after you place your order. Store pickup is always free.';
 
   const deliveryOptions = [
     {
       type: 'Doorstep Delivery (Accra)',
       time: '1-3 Business Days',
-      cost: fee(rates.accra),
-      description: 'Rider delivery to your door anywhere in Accra',
+      cost: 'Fee applies',
+      description: 'Rider delivery to your door anywhere in Accra; fee confirmed after you order',
       icon: 'ri-truck-line'
     },
     {
       type: 'Outside Accra Delivery',
       time: '3-7 Business Days',
-      cost: fee(rates.outsideAccra),
-      description: 'Courier delivery to every other region in Ghana',
+      cost: 'Fee applies',
+      description: 'Courier delivery to every other region in Ghana; fee confirmed after you order',
       icon: 'ri-map-pin-range-line'
     },
     {
@@ -66,7 +58,7 @@ export default async function ShippingPage() {
           <div className="max-w-3xl mx-auto text-center">
             <h1 className="text-5xl font-bold text-gray-900 mb-6">Shipping & Delivery</h1>
             <p className="text-xl text-gray-600 leading-relaxed">
-              Fast, reliable delivery across Ghana. {freeDeliveryNote}
+              Fast, reliable delivery across Ghana. {feeNote}
             </p>
           </div>
         </div>
@@ -96,7 +88,7 @@ export default async function ShippingPage() {
           </div>
           <h3 className="text-2xl font-bold text-gray-900 mb-3">Delivery Fees</h3>
           <p className="text-lg text-gray-600">
-            {freeDeliveryNote} Store pickup in Accra is <span className="font-bold text-brand">always free</span>.
+            Delivery fees depend on your location and are confirmed with you by our team after you order. Store pickup in Accra is <span className="font-bold text-brand">always free</span>.
           </p>
         </div>
 

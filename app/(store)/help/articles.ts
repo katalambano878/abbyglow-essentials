@@ -61,7 +61,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
         <li><strong>Kumasi, Takoradi, Cape Coast, Tamale and other major cities:</strong> 3–4 business days</li>
         <li><strong>All other locations in Ghana:</strong> 4–5 business days</li>
       </ul>
-      <p>The exact delivery fee for your order is shown at checkout before you pay. Store pickup in Accra is always free.</p>
+      <p>Delivery comes at a fee that depends on your location. Our team confirms the amount with you after you place your order. Store pickup in Accra is always free.</p>
       <h3>Pre-order items</h3>
       <p>Products marked <strong>Pre-order</strong> ship when the stock lands in Ghana. The expected timing is shown on the product page and in your confirmation email.</p>
       <p>Full details are on our <a href="/shipping">Shipping &amp; Delivery</a> page.</p>

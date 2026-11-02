@@ -358,7 +358,7 @@ function OrderSuccessContent() {
                 )}
                 <div className="flex justify-between text-sm text-gray-600 mb-2">
                   <span>Delivery</span>
-                  <span>{shippingTotal > 0 ? money(shippingTotal) : isDelivery ? 'Free' : 'Free store pickup'}</span>
+                  <span>{shippingTotal > 0 ? money(shippingTotal) : isDelivery ? 'Fee confirmed by our team' : 'Free store pickup'}</span>
                 </div>
                 <div className="flex justify-between text-sm text-gray-600 mb-2">
                   <span>Order total</span>

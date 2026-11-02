@@ -1,53 +1,16 @@
 /**
- * Single source of truth for delivery methods and pricing. The storefront
- * cart, checkout page, POS, server checkout, admin screens and emails all use
- * these helpers, so every screen shows the same number that is charged.
+ * Single source of truth for delivery methods. The storefront, POS, server
+ * checkout, admin screens and emails all use these helpers.
  *
- * Fees are set by the admin under Admin → Delivery Fees (stored in
- * `store_settings.delivery_rates`). The env vars below are only the fallback
- * used before an admin has saved fees:
- *   NEXT_PUBLIC_DELIVERY_FEE                flat Accra doorstep fee in GHS
- *   NEXT_PUBLIC_OUTSIDE_ACCRA_DELIVERY_FEE  flat fee for delivery outside Accra
- *   NEXT_PUBLIC_FREE_DELIVERY_THRESHOLD     subtotal at/above which delivery is free (0 = never)
+ * Store pickup is free. Doorstep delivery (Accra) and Outside Accra delivery
+ * come at a fee that the store agrees with the customer after the order is
+ * placed, so the online checkout charges the goods only and marks the order
+ * as "delivery fee to be confirmed". The POS enters the agreed fee directly.
  */
 
 export type DeliveryMethod = 'pickup' | 'delivery' | 'outside_accra';
 
 export const DELIVERY_METHODS: DeliveryMethod[] = ['pickup', 'delivery', 'outside_accra'];
-
-export interface DeliveryRates {
-  /** Doorstep delivery within Accra */
-  accra: number;
-  /** Doorstep delivery outside Accra */
-  outsideAccra: number;
-  /** Order subtotal (after discounts) at/above which delivery is free; 0 disables */
-  freeThreshold: number;
-}
-
-function readNumber(value: unknown, fallback: number): number {
-  const n = Number(value);
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : fallback;
-}
-
-export const DEFAULT_DELIVERY_RATES: DeliveryRates = {
-  accra: readNumber(process.env.NEXT_PUBLIC_DELIVERY_FEE, 25),
-  outsideAccra: readNumber(process.env.NEXT_PUBLIC_OUTSIDE_ACCRA_DELIVERY_FEE, 50),
-  freeThreshold: readNumber(process.env.NEXT_PUBLIC_FREE_DELIVERY_THRESHOLD, 0),
-};
-
-/** Kept for screens that only need to know whether delivery can cost anything. */
-export const DELIVERY_FEE = DEFAULT_DELIVERY_RATES.accra;
-export const FREE_DELIVERY_THRESHOLD = DEFAULT_DELIVERY_RATES.freeThreshold;
-
-/** Accepts the stored JSON (snake or camel case) or a partial object and fills gaps from the defaults. */
-export function normalizeDeliveryRates(raw: unknown): DeliveryRates {
-  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  return {
-    accra: readNumber(r.accra ?? r.delivery ?? r.accra_fee, DEFAULT_DELIVERY_RATES.accra),
-    outsideAccra: readNumber(r.outsideAccra ?? r.outside_accra, DEFAULT_DELIVERY_RATES.outsideAccra),
-    freeThreshold: readNumber(r.freeThreshold ?? r.free_threshold, DEFAULT_DELIVERY_RATES.freeThreshold),
-  };
-}
 
 /** Maps anything stored on an order (incl. the old POS value `doorstep`) to a known method. */
 export function parseDeliveryMethod(value: unknown): DeliveryMethod {
@@ -84,23 +47,33 @@ export function deliveryMethodHint(method: DeliveryMethod): string {
   }
 }
 
-/** Delivery cost for a subtotal (after discounts) and method. */
-export function computeShipping(
-  subtotal: number,
-  method: DeliveryMethod,
-  rates: DeliveryRates = DEFAULT_DELIVERY_RATES
-): number {
-  const parsed = parseDeliveryMethod(method);
-  if (parsed === 'pickup') return 0;
-  const fee = parsed === 'outside_accra' ? rates.outsideAccra : rates.accra;
-  if (fee <= 0) return 0;
-  if (rates.freeThreshold > 0 && subtotal >= rates.freeThreshold) return 0;
-  return Math.round(fee * 100) / 100;
+/** Text shown to the customer about the fee for a method. */
+export const FEE_TO_CONFIRM_TEXT = 'Fee confirmed with you by our team after you order';
+
+/**
+ * What the online checkout charges for delivery: nothing up front. The fee is
+ * agreed with the customer by the admin, so the goods total is what is paid now.
+ */
+export function computeShipping(_subtotal: number, _method: DeliveryMethod): number {
+  return 0;
 }
 
+/** Label for the delivery line in totals. `amount` is the recorded fee, if any. */
 export function shippingLabel(amount: number, method: DeliveryMethod): string {
   if (parseDeliveryMethod(method) === 'pickup') return 'Free store pickup';
-  return amount > 0 ? `GH₵ ${amount.toFixed(2)}` : 'Free delivery';
+  if (amount > 0) return `GH₵ ${amount.toFixed(2)}`;
+  return 'Fee to be confirmed';
+}
+
+/** True when the order is a delivery order whose fee has not been recorded. */
+export function deliveryFeePending(order: {
+  shipping_method?: string | null;
+  shipping_total?: number | string | null;
+  metadata?: any;
+}): boolean {
+  if (!isDeliveryMethod(order.shipping_method || order.metadata?.delivery_method)) return false;
+  if (order.metadata?.coupon_free_shipping === true) return false;
+  return Number(order.shipping_total || 0) <= 0;
 }
 
 /** Where an order came from: the online store or the in-store POS. */

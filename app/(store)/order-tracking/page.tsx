@@ -486,7 +486,7 @@ function OrderTrackingContent() {
             )}
             <div className="flex justify-between text-gray-600">
               <span>Delivery</span>
-              <span>{shippingTotal > 0 ? money(shippingTotal) : isDeliveryOrder ? 'Free' : 'Free store pickup'}</span>
+              <span>{shippingTotal > 0 ? money(shippingTotal) : isDeliveryOrder ? 'Fee confirmed by our team' : 'Free store pickup'}</span>
             </div>
             <div className="flex justify-between text-lg font-bold text-gray-900 border-t border-gray-200 pt-2">
               <span>Total</span>

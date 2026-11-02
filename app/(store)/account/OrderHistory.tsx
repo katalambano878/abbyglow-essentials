@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { deliveryMethodLabel } from '@/lib/shipping';
+import { deliveryMethodLabel, isDeliveryMethod } from '@/lib/shipping';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { useCart } from '@/context/CartContext';
@@ -352,7 +352,7 @@ export default function OrderHistory() {
                       <p className="text-xs text-gray-600 mb-1">Delivery</p>
                       <p className="font-semibold text-gray-900">
                         {deliveryMethodLabel(order.deliveryMethod)}
-                        <span className="text-gray-500 font-normal"> · {order.shippingTotal > 0 ? `GH₵${order.shippingTotal.toFixed(2)}` : 'Free'}</span>
+                        <span className="text-gray-500 font-normal"> · {order.shippingTotal > 0 ? `GH₵${order.shippingTotal.toFixed(2)}` : isDeliveryMethod(order.deliveryMethod) ? 'fee confirmed by our team' : 'Free'}</span>
                       </p>
                     </div>
                     {canPayBalance && (

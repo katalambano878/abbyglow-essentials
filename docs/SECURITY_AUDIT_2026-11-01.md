@@ -94,19 +94,19 @@ mismatch / success / replay (stock reduced once), staff upsert, storage upload l
 
 - **Three delivery methods:** `pickup` (free), `delivery` (doorstep within Accra) and
   `outside_accra` (courier to other regions). `lib/shipping.ts` is the single source of truth
-  (labels, parsing of the old POS value `doorstep`, fee calculation, order channel helpers).
-- **Fees are admin-editable** at Admin → Delivery Fees (`/admin/delivery`, admin role only),
-  stored in `store_settings.delivery_rates` and served to the storefront by
-  `GET /api/storefront/delivery-rates`. Checkout, POS, the server checkout, emails and the
-  Shipping info page all read the same numbers. Migration `20261102000000_delivery_rates_setting.sql`
-  seeds GH₵ 25 (Accra) / GH₵ 50 (outside Accra) / no free threshold — **the owner should set the
-  real amounts in the admin.** Coupons with free shipping still remove the fee.
+  (labels, parsing of the old POS value `doorstep`, order channel helpers).
+- **Delivery comes at a fee the admin agrees with the customer after the order.** The online
+  checkout shows "Fee applies" on both delivery options, charges the goods only, and records
+  `metadata.delivery_fee_pending = true`. Orders list / detail flag "fee to agree with customer";
+  My Orders, tracking, success page, emails and the Shipping / FAQ pages say the fee is confirmed
+  by the team. The POS has a "Delivery fee agreed with customer" field that is added to the sale.
+  (A fixed-fee version with an admin Delivery Fees page was built and then removed the same day;
+  the `store_settings.delivery_rates` row it seeded was deleted from production.)
 - **Orders record how they came in:** `metadata.channel` is `web` or `pos`
   (older orders fall back to `checkout_source`), `shipping_method` holds the delivery method and
-  `shipping_total` the fee. Admin → Orders has Channel (Web / POS) and Delivery chips with counts,
-  a Channel / Delivery column, matching filters and CSV columns; the order detail shows method,
-  fee and channel. Customers see the method and fee on My Orders, the order tracking page, the
-  order success page and in their emails.
+  `shipping_total` any recorded fee. Admin → Orders has Channel (Web / POS) and Delivery chips with
+  counts, a Channel / Delivery column, matching filters and CSV columns; the order detail shows
+  method, fee status and channel.
 - **Payment plan removed from checkout.** The store takes full payment only, so the
   "Payment Plan / Full Payment" step is gone and the API ignores any `paymentPlan` sent by a
   client. The DB columns stay for historical deposit orders, and those still show their plan.

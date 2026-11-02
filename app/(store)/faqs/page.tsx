@@ -47,7 +47,7 @@ export default function FAQsPage() {
     {
       category: 'shipping',
       question: 'How much does shipping cost?',
-      answer: 'Store pickup in Accra is always free. The delivery fee, if any, is shown on the checkout page before you pay, so there are no surprises.'
+      answer: 'Store pickup in Accra is always free. Doorstep and outside-Accra delivery come at a fee that depends on your location; our team confirms the amount with you after you place your order.'
     },
     {
       category: 'shipping',

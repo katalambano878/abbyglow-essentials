@@ -18,11 +18,9 @@ import { useRecaptcha } from '@/hooks/useRecaptcha';
 import {
   computeShipping,
   deliveryMethodHint,
-  DEFAULT_DELIVERY_RATES,
-  normalizeDeliveryRates,
+  FEE_TO_CONFIRM_TEXT,
   shippingLabel,
   type DeliveryMethod,
-  type DeliveryRates,
 } from '@/lib/shipping';
 
 const CHECKOUT_EMAIL_KEY = 'abbyglow_checkout_email';
@@ -95,7 +93,6 @@ export default function CheckoutPage() {
   ];
 
   const [deliveryMethod, setDeliveryMethod] = useState<DeliveryMethod>('pickup');
-  const [deliveryRates, setDeliveryRates] = useState<DeliveryRates>(DEFAULT_DELIVERY_RATES);
   const [paymentGateway, setPaymentGateway] = useState<'moolre' | 'hubtel' | ''>('');
   const [gateways, setGateways] = useState<Array<{ id: 'moolre' | 'hubtel'; label: string; configured: boolean }>>([]);
   const [errors, setErrors] = useState<any>({});
@@ -145,23 +142,11 @@ export default function CheckoutPage() {
   const subtotal = cartSubtotal;
   const couponDiscount = Math.min(appliedCoupon?.discount || 0, subtotal);
   const discountedSubtotal = Math.max(0, Math.round((subtotal - couponDiscount) * 100) / 100);
-  const shippingCost = appliedCoupon?.freeShipping ? 0 : computeShipping(discountedSubtotal, deliveryMethod, deliveryRates);
+  // Delivery fees are agreed with the customer by the store after ordering, so
+  // the checkout charges the goods only (computeShipping returns 0).
+  const shippingCost = computeShipping(discountedSubtotal, deliveryMethod);
   const tax = 0; // No Tax
   const total = Math.round((discountedSubtotal + shippingCost + tax) * 100) / 100;
-  const feePreview = (method: DeliveryMethod) =>
-    appliedCoupon?.freeShipping ? 0 : computeShipping(discountedSubtotal, method, deliveryRates);
-
-  // Delivery fees come from the admin's settings; the server charges the same numbers.
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/storefront/delivery-rates')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((json) => {
-        if (!cancelled && json?.rates) setDeliveryRates(normalizeDeliveryRates(json.rates));
-      })
-      .catch(() => { /* keep defaults */ });
-    return () => { cancelled = true; };
-  }, []);
 
   // Re-validate the stored / applied coupon against the current subtotal + email
   useEffect(() => {
@@ -612,19 +597,20 @@ export default function CheckoutPage() {
                   <h2 className="text-xl font-bold text-gray-900 mb-6">Delivery Method</h2>
                   <div className="space-y-4">
                     {([
-                      { id: 'pickup', title: 'Store Pickup', hint: deliveryMethodHint('pickup') },
+                      { id: 'pickup', title: 'Store Pickup', hint: deliveryMethodHint('pickup'), fee: false },
                       {
                         id: 'delivery',
                         title: 'Doorstep Delivery (Accra)',
-                        hint: `${deliveryMethodHint('delivery')} — to ${shippingData.city || 'your address'}`,
+                        hint: `${deliveryMethodHint('delivery')} — to ${shippingData.city || 'your address'}. ${FEE_TO_CONFIRM_TEXT}.`,
+                        fee: true,
                       },
                       {
                         id: 'outside_accra',
                         title: 'Outside Accra Delivery',
-                        hint: `${deliveryMethodHint('outside_accra')}${shippingData.region ? ` — ${shippingData.region}` : ''}`,
+                        hint: `${deliveryMethodHint('outside_accra')}${shippingData.region ? ` — ${shippingData.region}` : ''}. ${FEE_TO_CONFIRM_TEXT}.`,
+                        fee: true,
                       },
-                    ] as Array<{ id: DeliveryMethod; title: string; hint: string }>).map((option) => {
-                      const fee = feePreview(option.id);
+                    ] as Array<{ id: DeliveryMethod; title: string; hint: string; fee: boolean }>).map((option) => {
                       const selected = deliveryMethod === option.id;
                       return (
                         <label
@@ -645,8 +631,8 @@ export default function CheckoutPage() {
                               <p className="text-sm text-gray-600">{option.hint}</p>
                             </div>
                           </div>
-                          <p className={`font-bold whitespace-nowrap ${fee > 0 ? 'text-gray-900' : 'text-brand'}`}>
-                            {fee > 0 ? `GH₵ ${fee.toFixed(2)}` : 'FREE'}
+                          <p className={`font-bold whitespace-nowrap ${option.fee ? 'text-gray-900' : 'text-brand'}`}>
+                            {option.fee ? 'Fee applies' : 'FREE'}
                           </p>
                         </label>
                       );

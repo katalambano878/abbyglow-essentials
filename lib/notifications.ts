@@ -1,5 +1,5 @@
 import { Resend } from 'resend';
-import { deliveryMethodLabel, isDeliveryMethod, orderChannelLabel } from '@/lib/shipping';
+import { deliveryFeePending, deliveryMethodLabel, orderChannelLabel } from '@/lib/shipping';
 import { supabaseAdmin as supabase } from '@/lib/supabase-admin';
 import { escapeHtml } from '@/lib/sanitize';
 import { fetchWithTimeout } from '@/lib/fetch-timeout';
@@ -118,7 +118,7 @@ function emailTotalsTable(order: any): string {
 
     return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f9fafb;border-radius:12px;overflow:hidden;margin:12px 0 20px;">
 ${line('Subtotal', fmt(subtotal))}
-${line('Delivery', shippingVal > 0 ? fmt(shippingVal) : 'Free / Pickup')}
+${line('Delivery', shippingVal > 0 ? fmt(shippingVal) : deliveryFeePending(order) ? 'Fee to be confirmed with you' : 'Free / Pickup')}
 ${discountVal > 0 ? line('Discount', `-${fmt(discountVal)}`) : ''}
 ${isDepositPlan(order.payment_plan) ? line('Payment plan', plan) : ''}
 ${paid > 0 ? line('Amount paid', fmt(paid)) : ''}

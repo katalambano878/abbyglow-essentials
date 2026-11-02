@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import FraudDetectionAlert from '@/components/FraudDetectionAlert';
 import { depositPlanLabel, isDepositPlan } from '@/lib/payments/plans';
-import { deliveryMethodLabel, isDeliveryMethod, orderChannelLabel } from '@/lib/shipping';
+import { deliveryFeePending, deliveryMethodLabel, isDeliveryMethod, orderChannelLabel } from '@/lib/shipping';
 
 interface OrderDetailClientProps {
   orderId: string;
@@ -754,7 +754,15 @@ export default function OrderDetailClient({ orderId }: OrderDetailClientProps) {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Delivery fee</span>
-                  <span className="font-semibold text-gray-900">{Number(order.shipping_total || 0) > 0 ? `GH₵ ${Number(order.shipping_total).toFixed(2)}` : 'Free'}</span>
+                  <span className={`font-semibold ${deliveryFeePending(order) ? 'text-amber-700' : 'text-gray-900'}`}>
+                    {Number(order.shipping_total || 0) > 0
+                      ? `GH₵ ${Number(order.shipping_total).toFixed(2)}`
+                      : deliveryFeePending(order)
+                        ? 'Not included — agree the fee with the customer'
+                        : order.metadata?.coupon_free_shipping
+                          ? 'Free (coupon)'
+                          : 'Free'}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Channel</span>

@@ -232,12 +232,6 @@ export default function AdminLayout({
       path: '/admin/coupons'
     },
     {
-      title: 'Delivery Fees',
-      icon: 'ri-truck-line',
-      path: '/admin/delivery',
-      adminOnly: true
-    },
-    {
       title: 'Customer Insights',
       icon: 'ri-user-search-line',
       path: '/admin/customer-insights',

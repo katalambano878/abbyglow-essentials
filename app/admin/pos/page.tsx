@@ -3,14 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { fetchPosCustomers } from '@/lib/admin/customers';
-import {
-    computeShipping,
-    deliveryMethodLabel,
-    DEFAULT_DELIVERY_RATES,
-    normalizeDeliveryRates,
-    type DeliveryMethod,
-    type DeliveryRates,
-} from '@/lib/shipping';
+import { deliveryMethodLabel, type DeliveryMethod } from '@/lib/shipping';
 
 interface Product {
     id: string;
@@ -66,7 +59,8 @@ export default function POSPage() {
     const [stockNotice, setStockNotice] = useState<string | null>(null);
     const [linkCopied, setLinkCopied] = useState(false);
     const [deliveryMethod, setDeliveryMethod] = useState<DeliveryMethod>('pickup');
-    const [deliveryRates, setDeliveryRates] = useState<DeliveryRates>(DEFAULT_DELIVERY_RATES);
+    // Fee agreed with the customer for doorstep / outside-Accra delivery, entered by staff.
+    const [deliveryFeeInput, setDeliveryFeeInput] = useState('');
     const [guestDetails, setGuestDetails] = useState({
         firstName: '',
         lastName: '',
@@ -201,20 +195,10 @@ export default function POSPage() {
 
     const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.cartQuantity), 0);
     const tax = cartTotal * 0.0;
-    const deliveryFee = computeShipping(cartTotal, deliveryMethod, deliveryRates);
+    const deliveryFee = deliveryMethod === 'pickup'
+        ? 0
+        : Math.max(0, Math.round((parseFloat(deliveryFeeInput) || 0) * 100) / 100);
     const grandTotal = Math.round((cartTotal + tax + deliveryFee) * 100) / 100;
-
-    // Same delivery fees the online checkout charges (Admin → Delivery Fees).
-    useEffect(() => {
-        let cancelled = false;
-        fetch('/api/storefront/delivery-rates')
-            .then((r) => (r.ok ? r.json() : null))
-            .then((json) => {
-                if (!cancelled && json?.rates) setDeliveryRates(normalizeDeliveryRates(json.rates));
-            })
-            .catch(() => { /* keep defaults */ });
-        return () => { cancelled = true; };
-    }, []);
     const changeDue = amountTendered ? (parseFloat(amountTendered) - grandTotal) : 0;
 
     // Get the customer email and phone for the order
@@ -335,6 +319,7 @@ export default function POSPage() {
                         channel: 'pos',
                         delivery_method: deliveryMethod,
                         delivery_fee: deliveryFee,
+                        delivery_fee_pending: deliveryMethod !== 'pickup' && deliveryFee <= 0,
                         payment_gateway: paymentMethod,
                         walk_in: walkIn,
                         first_name: addressData.firstName,
@@ -417,6 +402,7 @@ export default function POSPage() {
                     changeDue: paymentMethod === 'cash' ? Math.max(0, (parseFloat(amountTendered) || 0) - grandTotal) : 0,
                 });
                 setCart([]);
+                setDeliveryFeeInput('');
 
                 // Send notification (server resolves the order by its number)
                 if (hasRealEmail) {
@@ -459,6 +445,7 @@ export default function POSPage() {
                     paymentPending: true
                 });
                 setCart([]);
+                setDeliveryFeeInput('');
             }
 
         } catch (error: any) {
@@ -884,7 +871,6 @@ export default function POSPage() {
                                                 { id: 'outside_accra', icon: 'ri-map-pin-range-line', hint: 'Other regions' },
                                             ] as Array<{ id: DeliveryMethod; icon: string; hint: string }>).map((option) => {
                                                 const selected = deliveryMethod === option.id;
-                                                const fee = computeShipping(cartTotal, option.id, deliveryRates);
                                                 return (
                                                     <button
                                                         key={option.id}
@@ -898,7 +884,7 @@ export default function POSPage() {
                                                         <i className={`${option.icon} text-xl ${selected ? 'text-brand' : 'text-gray-400'}`}></i>
                                                         <div className="text-left">
                                                             <p className={`text-sm font-semibold ${selected ? 'text-brand' : 'text-gray-700'}`}>{deliveryMethodLabel(option.id)}</p>
-                                                            <p className="text-xs text-gray-500">{option.hint} · {fee > 0 ? `GH₵${fee.toFixed(2)}` : 'Free'}</p>
+                                                            <p className="text-xs text-gray-500">{option.hint} · {option.id === 'pickup' ? 'Free' : 'Fee applies'}</p>
                                                         </div>
                                                     </button>
                                                 );
@@ -912,6 +898,20 @@ export default function POSPage() {
                                                     <i className="ri-map-pin-line mr-2 text-brand"></i>
                                                     Delivery Address
                                                 </h4>
+                                                <div>
+                                                    <label className="block text-xs font-semibold text-gray-700 mb-1">Delivery fee agreed with customer (GH₵)</label>
+                                                    <input
+                                                        type="number"
+                                                        min={0}
+                                                        step="0.01"
+                                                        inputMode="decimal"
+                                                        placeholder="0.00"
+                                                        value={deliveryFeeInput}
+                                                        onChange={e => setDeliveryFeeInput(e.target.value)}
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-brand text-sm"
+                                                    />
+                                                    <p className="text-[11px] text-gray-500 mt-1">Added to the amount to pay. Leave at 0 if the fee is collected later.</p>
+                                                </div>
                                                 <input
                                                     type="text"
                                                     placeholder="Street Address / Location *"

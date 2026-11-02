@@ -7,7 +7,6 @@ import { computePaymentPlan } from '@/lib/payments/plans';
 import { isGatewayConfigured, parseGateway } from '@/lib/payments/gateways';
 import { getPreorderShippingNote, isPreorderProduct } from '@/lib/preorder';
 import { computeShipping, parseDeliveryMethod } from '@/lib/shipping';
-import { getDeliveryRates } from '@/lib/shipping-server';
 import { recordCouponUse, validateCoupon } from '@/lib/coupons';
 import { generateOrderNumber, generateTrackingNumber } from '@/lib/order-number';
 
@@ -228,8 +227,8 @@ export async function POST(req: Request) {
     }
 
     const discountedSubtotal = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
-    const deliveryRates = await getDeliveryRates();
-    const shippingCost = couponFreeShipping ? 0 : computeShipping(discountedSubtotal, deliveryMethod, deliveryRates);
+    // Delivery fees are agreed with the customer after ordering; the checkout charges goods only.
+    const shippingCost = computeShipping(discountedSubtotal, deliveryMethod);
     const tax = 0;
     const total = Math.round((discountedSubtotal + shippingCost + tax) * 100) / 100;
     // The store takes full payment only; the plan columns stay for historical deposit orders.
@@ -284,6 +283,8 @@ export async function POST(req: Request) {
             payment_plan: planBreakdown.plan,
             delivery_method: deliveryMethod,
             delivery_fee: shippingCost,
+            delivery_fee_pending: deliveryMethod !== 'pickup' && !couponFreeShipping,
+            coupon_free_shipping: couponFreeShipping,
             coupon_code: couponApplied,
             coupon_discount: discount,
           },

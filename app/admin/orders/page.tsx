@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { adminFetch } from '@/lib/admin-fetch';
 import ProductSalesStats from './ProductSalesStats';
 import { depositPlanLabel, isDepositPlan } from '@/lib/payments/plans';
-import { deliveryMethodLabel, orderChannel, orderChannelLabel, parseDeliveryMethod, type DeliveryMethod, type OrderChannel } from '@/lib/shipping';
+import { deliveryFeePending, deliveryMethodLabel, orderChannel, orderChannelLabel, parseDeliveryMethod, type DeliveryMethod, type OrderChannel } from '@/lib/shipping';
 
 const DELIVERY_FILTERS: Array<{ id: DeliveryMethod; label: string }> = [
   { id: 'pickup', label: 'Store Pickup' },
@@ -267,7 +267,7 @@ export default function AdminOrdersPage() {
         formatDate(o.created_at),
         getItemCount(o),
         Number(o.total || 0).toFixed(2),
-        Number(o.shipping_total || 0).toFixed(2),
+        Number(o.shipping_total || 0) > 0 ? Number(o.shipping_total).toFixed(2) : deliveryFeePending(o) ? 'To agree' : '0.00',
         orderChannelLabel(o),
         deliveryMethodLabel(orderDelivery(o)),
         o.status,
@@ -767,9 +767,11 @@ export default function AdminOrdersPage() {
                         <span className="text-xs text-gray-700">
                           <i className={`${orderDelivery(order) === 'pickup' ? 'ri-store-2-line' : orderDelivery(order) === 'outside_accra' ? 'ri-map-pin-range-line' : 'ri-truck-line'} mr-1 text-gray-400`}></i>
                           {deliveryMethodLabel(orderDelivery(order))}
-                          {Number(order.shipping_total || 0) > 0 && (
+                          {Number(order.shipping_total || 0) > 0 ? (
                             <span className="text-gray-400"> · GH₵ {Number(order.shipping_total).toFixed(2)}</span>
-                          )}
+                          ) : deliveryFeePending(order) ? (
+                            <span className="text-amber-600 font-medium"> · fee to agree with customer</span>
+                          ) : null}
                         </span>
                       </div>
                     </td>
