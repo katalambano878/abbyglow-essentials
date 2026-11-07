@@ -112,3 +112,25 @@ mismatch / success / replay (stock reduced once), staff upsert, storage upload l
   client. The DB columns stay for historical deposit orders, and those still show their plan.
 - **Dev fix:** the one-year `immutable` cache header on `/_next/static` now applies to production
   builds only; in `next dev` it made browsers keep running stale chunks.
+
+## Profit margins and End of Day (2026-11-07, modelled on mkgadgets)
+
+- **Supplier costs** live in a new `product_costs` table (`cost_price`, `supplier_name`, `notes`,
+  `updated_by`), not on `products`, because the public catalog shim returns whole product rows.
+  The REST shim refuses `product_costs` to anyone who is not an admin, staff included
+  (`lib/db/rest-acl.ts`). Migration `20261107000000_product_costs.sql` also adds indexes on
+  `orders.created_at` and `order_items.order_id` for the daily queries.
+- **Admin → Profit Margins** (`/admin/profit`, admin role only): every product with supplier cost,
+  current selling price (lowest variant price when variants exist), profit per item and margin %,
+  with filters (no cost yet / under 25% / sold in 30 days), totals (average margin, 30-day profit,
+  stock at cost, profit in stock) and an inline editor. `GET/PUT /api/admin/profit`; every save
+  is written to `audit_logs`.
+- **Admin → End of Day** (`/admin/end-of-day`, staff and admin): pick a day (Accra time) and see
+  paid sales with yesterday / last-week comparison, average order, website vs POS split, sales by
+  hour, how customers paid, sales by staff (POS), stock movement with stock left and low-stock
+  warnings, a to-do list (to package, delivery fee to agree, awaiting payment, partly paid,
+  cancelled, discounts, delivery fees) and every order of the day. Profit per item and total
+  profit appear for admins only. "Print close" prints the report without the admin chrome.
+  `GET /api/admin/end-of-day?date=YYYY-MM-DD`.
+- **POS** now stamps `metadata.sold_by_id / sold_by_name / sold_by_email / sold_by_role` from the
+  signed-in staff profile so the End of Day report can attribute in-store sales.

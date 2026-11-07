@@ -116,6 +116,11 @@ export function authorizeRestTable(
 ): AclDecision {
   const t = table.toLowerCase();
 
+  // Supplier costs are admin-only, even for staff accounts, so margins never leak.
+  if (t === "product_costs" && !actor.isServiceRole && actor.role !== "admin") {
+    return deny("Admin access required");
+  }
+
   if (actor.isServiceRole || actor.isStaff) {
     return allow();
   }

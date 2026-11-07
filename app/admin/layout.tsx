@@ -191,6 +191,11 @@ export default function AdminLayout({
       path: '/admin/pos'
     },
     {
+      title: 'End of Day',
+      icon: 'ri-calendar-check-line',
+      path: '/admin/end-of-day'
+    },
+    {
       title: 'Buy SMS',
       icon: 'ri-message-2-line',
       path: '/admin/sms-credit',
@@ -225,6 +230,12 @@ export default function AdminLayout({
       title: 'Analytics',
       icon: 'ri-bar-chart-line',
       path: '/admin/analytics'
+    },
+    {
+      title: 'Profit Margins',
+      icon: 'ri-line-chart-line',
+      path: '/admin/profit',
+      adminOnly: true
     },
     {
       title: 'Coupons',
@@ -288,7 +299,7 @@ export default function AdminLayout({
 
       {/* Sidebar - Mobile: Transform / Desktop: Width transition */}
       <aside
-        className={`fixed top-0 left-0 z-40 h-screen bg-white border-r border-gray-200 transition-all duration-300
+        className={`fixed top-0 left-0 z-40 h-screen bg-white border-r border-gray-200 transition-all duration-300 print:hidden
           w-64
           ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} 
           ${isSidebarOpen ? 'lg:w-64' : 'lg:w-0 lg:overflow-hidden'}
@@ -343,8 +354,8 @@ export default function AdminLayout({
       </aside>
 
       {/* Main Content */}
-      <div className={`transition-all duration-300 ml-0 ${isSidebarOpen ? 'lg:ml-64' : 'lg:ml-0'}`}>
-        <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
+      <div className={`transition-all duration-300 ml-0 print:ml-0 ${isSidebarOpen ? 'lg:ml-64' : 'lg:ml-0'}`}>
+        <header className="bg-white border-b border-gray-200 sticky top-0 z-30 print:hidden">
           <div className="px-4 py-4 lg:px-6 flex items-center justify-between">
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}

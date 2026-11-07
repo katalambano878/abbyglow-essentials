@@ -61,6 +61,8 @@ export default function POSPage() {
     const [deliveryMethod, setDeliveryMethod] = useState<DeliveryMethod>('pickup');
     // Fee agreed with the customer for doorstep / outside-Accra delivery, entered by staff.
     const [deliveryFeeInput, setDeliveryFeeInput] = useState('');
+    // Who is ringing up the sale — recorded on the order for the End of Day report.
+    const [actor, setActor] = useState<{ id: string; name: string | null; email: string | null; role: string | null } | null>(null);
     const [guestDetails, setGuestDetails] = useState({
         firstName: '',
         lastName: '',
@@ -79,6 +81,27 @@ export default function POSPage() {
 
     useEffect(() => {
         fetchData();
+    }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session?.user || cancelled) return;
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('full_name, email, role')
+                .eq('id', session.user.id)
+                .maybeSingle();
+            if (cancelled) return;
+            setActor({
+                id: session.user.id,
+                name: profile?.full_name || null,
+                email: profile?.email || session.user.email || null,
+                role: profile?.role || null,
+            });
+        })();
+        return () => { cancelled = true; };
     }, []);
 
     const fetchData = async () => {
@@ -317,6 +340,10 @@ export default function POSPage() {
                         pos_sale: true,
                         checkout_source: 'pos',
                         channel: 'pos',
+                        sold_by_id: actor?.id || null,
+                        sold_by_name: actor?.name || null,
+                        sold_by_email: actor?.email || null,
+                        sold_by_role: actor?.role || null,
                         delivery_method: deliveryMethod,
                         delivery_fee: deliveryFee,
                         delivery_fee_pending: deliveryMethod !== 'pickup' && deliveryFee <= 0,
