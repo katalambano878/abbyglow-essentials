@@ -125,6 +125,7 @@ export default function Footer() {
       <div className="relative border-t border-white/10">
         <div className="max-w-[1400px] mx-auto px-4 sm:px-8 py-4 flex flex-col sm:flex-row justify-between items-center gap-3 text-[11px] font-bold uppercase tracking-wide text-white/45">
           <p>&copy; {new Date().getFullYear()} {siteName}</p>
+          <p>Powered by <a href="https://doctorbarns.com" target="_blank" rel="noopener" className="text-white/45 hover:underline">Doctor Barns Tech</a></p>
           <div className="flex gap-4 text-white/50">
             <i className="ri-visa-line text-2xl" />
             <i className="ri-mastercard-line text-2xl" />
