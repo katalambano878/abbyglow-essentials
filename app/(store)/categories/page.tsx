@@ -67,13 +67,16 @@ export default async function CategoriesPage() {
         {categories.length > 0 ? (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
             {categories.map((category) => (
-              <Link
+              <div
                 key={category.id}
-                href={`/shop?category=${category.slug}`}
-                className="group relative bg-white p-2.5 sm:p-3 rounded-[2rem] sm:rounded-[2.5rem] flex flex-col border border-gray-100/80 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_60px_-15px_rgba(0,0,0,0.08)] transition-all duration-1000 hover:-translate-y-1 cursor-pointer"
+                className="group relative bg-white p-2.5 sm:p-3 rounded-[2rem] sm:rounded-[2.5rem] flex flex-col border border-gray-100/80 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_60px_-15px_rgba(0,0,0,0.08)] transition-all duration-1000 hover:-translate-y-1"
               >
-                {/* Image Section */}
-                <div className="relative h-64 sm:h-72 w-full overflow-hidden rounded-[1.5rem] sm:rounded-[2rem] bg-gray-50">
+                {/* Image Section (links cannot nest, so the card is a div with its own links) */}
+                <Link
+                  href={`/shop?category=${category.slug}`}
+                  aria-label={`Shop ${category.name}`}
+                  className="relative block h-64 sm:h-72 w-full overflow-hidden rounded-[1.5rem] sm:rounded-[2rem] bg-gray-50"
+                >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={category.image}
@@ -95,12 +98,12 @@ export default async function CategoriesPage() {
                       </span>
                     </div>
                   </div>
-                </div>
+                </Link>
 
                 {/* Content Section */}
                 <div className="px-5 py-6 sm:px-6 flex flex-col flex-1 relative z-20">
                   <h3 className="text-xl sm:text-2xl font-black text-gray-900 mb-3 tracking-tight group-hover:text-brand-dark transition-colors duration-500">
-                    {category.name}
+                    <Link href={`/shop?category=${category.slug}`}>{category.name}</Link>
                   </h3>
                   <p className="text-gray-500 font-light leading-relaxed text-[15px] mb-6 line-clamp-2">
                     {category.description || 'Explore our exclusive collection in this category.'}
@@ -121,16 +124,19 @@ export default async function CategoriesPage() {
                   )}
 
                   {/* Bottom Action Area */}
-                  <div className="mt-auto pt-5 border-t border-gray-100/60 flex items-center justify-between">
+                  <Link
+                    href={`/shop?category=${category.slug}`}
+                    className="mt-auto pt-5 border-t border-gray-100/60 flex items-center justify-between"
+                  >
                     <span className="text-gray-900 font-semibold text-sm tracking-wide group-hover:text-brand transition-colors duration-500">
                       Explore Collection
                     </span>
                     <div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center group-hover:bg-brand-soft group-hover:shadow-md transition-all duration-500 -rotate-45 group-hover:rotate-0">
                       <i className="ri-arrow-right-line text-lg text-gray-400 group-hover:text-brand transition-colors duration-500"></i>
                     </div>
-                  </div>
+                  </Link>
                 </div>
-              </Link>
+              </div>
             ))}
           </div>
         ) : (

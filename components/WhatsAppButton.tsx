@@ -22,14 +22,13 @@ export default function WhatsAppButton({ paths = ['/'] }: { paths?: string[] }) 
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Chat with AbbyGlow on WhatsApp"
-      className="wa-float group fixed right-4 sm:right-6 z-40 flex items-center gap-3 rounded-full bg-[#25D366] text-white shadow-[0_10px_30px_-8px_rgba(37,211,102,0.65)] transition-transform duration-200 ease-out hover:-translate-y-0.5 active:scale-95 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#25D366]/40"
+      className="wa-float fixed right-4 sm:right-6 z-40 block rounded-full bg-[#25D366] text-white shadow-[0_10px_30px_-8px_rgba(37,211,102,0.65)] transition-transform duration-200 ease-out hover:-translate-y-0.5 active:scale-95 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#25D366]/40"
     >
-      <span className="relative grid h-14 w-14 place-items-center">
+      <span className="relative grid h-14 w-14 place-items-center sm:h-16 sm:w-16">
         <span aria-hidden className="wa-ring absolute inset-0 rounded-full bg-[#25D366]" />
         <span aria-hidden className="wa-ring wa-ring-late absolute inset-0 rounded-full bg-[#25D366]" />
-        <i className="ri-whatsapp-fill relative text-[30px] leading-none" aria-hidden />
+        <i className="ri-whatsapp-fill relative text-[30px] leading-none sm:text-[34px]" aria-hidden />
       </span>
-      <span className="hidden sm:block pr-5 text-[14px] font-semibold tracking-wide">Chat with us</span>
     </a>
   );
 }

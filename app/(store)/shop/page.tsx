@@ -27,7 +27,7 @@ function ShopContent() {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [priceRange, setPriceRange] = useState([0, 5000]);
   const [selectedRating, setSelectedRating] = useState(0);
-  const [sortBy, setSortBy] = useState('popular');
+  const [sortBy, setSortBy] = useState('name');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -137,11 +137,13 @@ function ShopContent() {
               case 'new':
                 query = query.order('created_at', { ascending: false });
                 break;
-              case 'popular':
+              case 'name':
               default:
-                query = query.order('created_at', { ascending: false });
+                // Alphabetical keeps a product's variants side by side (Focus Factor, Focus Factor Kids).
+                query = query.order('name', { ascending: true });
                 break;
             }
+            if (sortBy !== 'name') query = query.order('name', { ascending: true });
 
             // Pagination
             const from = (page - 1) * productsPerPage;
@@ -432,7 +434,7 @@ function ShopContent() {
                     }}
                     className="px-4 py-2 pr-8 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand focus:border-brand text-sm bg-white cursor-pointer"
                   >
-                    <option value="popular">Most Popular</option>
+                    <option value="name">Name: A to Z</option>
                     <option value="new">Newest</option>
                     <option value="price-low">Price: Low to High</option>
                     <option value="price-high">Price: High to Low</option>
