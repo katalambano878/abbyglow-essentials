@@ -112,10 +112,14 @@ export default function POSPage() {
                 .from('products')
                 .select(`
           id, name, price, quantity, sku,
-          categories(name),
+          categories(name, parent_id),
           product_images(url)
         `)
                 .order('name');
+
+            // Sub-categories roll up into their parent so the POS chips stay short.
+            const { data: catData } = await supabase.from('categories').select('id, name');
+            const categoryNames = new Map<string, string>((catData || []).map((c: any) => [c.id, c.name]));
 
             if (prodData) {
                 const formatted: Product[] = prodData.map((p: any) => ({
@@ -123,7 +127,7 @@ export default function POSPage() {
                     name: p.name,
                     price: p.price,
                     quantity: p.quantity,
-                    category: p.categories?.name || 'Uncategorized',
+                    category: (p.categories?.parent_id && categoryNames.get(p.categories.parent_id)) || p.categories?.name || 'Uncategorized',
                     image: p.product_images?.[0]?.url || '/images/placeholder-product.svg',
                     sku: p.sku
                 }));

@@ -11,6 +11,7 @@ type CategoryRow = {
   description: string | null;
   image_url: string | null;
   position: number | null;
+  parent_id: string | null;
 };
 
 export default async function CategoriesPage() {
@@ -22,7 +23,8 @@ export default async function CategoriesPage() {
       slug,
       description,
       image_url,
-      position
+      position,
+      parent_id
     `)
     .eq('status', 'active')
     .order('position', { ascending: true });
@@ -38,15 +40,20 @@ export default async function CategoriesPage() {
     { color: 'from-brand to-brand-dark', icon: 'ri-store-2-line' },
   ];
 
-  const categories = ((categoriesData || []) as CategoryRow[]).map((c, i) => {
-    const style = palette[i % palette.length];
-    return {
-      ...c,
-      image: c.image_url || FALLBACK_CATEGORY_IMAGE,
-      color: style.color,
-      icon: style.icon,
-    };
-  });
+  const rows = (categoriesData || []) as CategoryRow[];
+  // Top-level categories get a card; their sub-categories are listed inside it.
+  const categories = rows
+    .filter((c) => !c.parent_id)
+    .map((c, i) => {
+      const style = palette[i % palette.length];
+      return {
+        ...c,
+        image: c.image_url || FALLBACK_CATEGORY_IMAGE,
+        color: style.color,
+        icon: style.icon,
+        children: rows.filter((sub) => sub.parent_id === c.id),
+      };
+    });
 
   return (
     <div className="min-h-screen bg-white">
@@ -95,9 +102,23 @@ export default async function CategoriesPage() {
                   <h3 className="text-xl sm:text-2xl font-black text-gray-900 mb-3 tracking-tight group-hover:text-brand-dark transition-colors duration-500">
                     {category.name}
                   </h3>
-                  <p className="text-gray-500 font-light leading-relaxed text-[15px] mb-8 line-clamp-2">
+                  <p className="text-gray-500 font-light leading-relaxed text-[15px] mb-6 line-clamp-2">
                     {category.description || 'Explore our exclusive collection in this category.'}
                   </p>
+                  {category.children.length > 0 && (
+                    <ul className="flex flex-wrap gap-2 mb-8" aria-label={`${category.name} sub-categories`}>
+                      {category.children.map((sub) => (
+                        <li key={sub.id}>
+                          <Link
+                            href={`/shop?category=${sub.slug}`}
+                            className="inline-block rounded-full border border-gray-200 px-3 py-1 text-[12px] font-medium text-gray-700 transition-colors duration-200 hover:border-gray-900 hover:text-gray-900"
+                          >
+                            {sub.name}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
 
                   {/* Bottom Action Area */}
                   <div className="mt-auto pt-5 border-t border-gray-100/60 flex items-center justify-between">

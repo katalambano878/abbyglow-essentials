@@ -689,10 +689,6 @@ export default function ProductDetailClient({ slug }: { slug: string }) {
                     <span>Free store pickup available</span>
                   </div>
                   <div className="flex items-center text-gray-500 text-[14px] font-light">
-                    <i className="ri-arrow-left-right-line text-lg text-gray-400 mr-3.5"></i>
-                    <span>30-day easy returns and exchanges</span>
-                  </div>
-                  <div className="flex items-center text-gray-500 text-[14px] font-light">
                     <i className="ri-shield-check-line text-lg text-gray-400 mr-3.5"></i>
                     <span>Secure payment & buyer protection</span>
                   </div>

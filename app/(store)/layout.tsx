@@ -8,6 +8,7 @@ import MobileBottomNav from '@/components/MobileBottomNav';
 import ScrollToTop from '@/components/ScrollToTop';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import NavigationProgress from '@/components/NavigationProgress';
+import WhatsAppButton from '@/components/WhatsAppButton';
 import { CMSProvider } from '@/context/CMSContext';
 
 // Lazy-load non-critical components
@@ -42,6 +43,7 @@ export default function StoreLayout({
         </ErrorBoundary>
         <NewsletterSection />
         <Footer />
+        <WhatsAppButton />
         <MobileBottomNav />
         <SessionTimeoutWarning />
         <PWAPrompt />

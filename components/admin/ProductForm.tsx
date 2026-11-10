@@ -273,9 +273,18 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
     useEffect(() => {
         let cancelled = false;
         async function fetchCategories() {
-            const { data } = await supabase.from('categories').select('id, name').eq('status', 'active').order('name');
+            const { data } = await supabase.from('categories').select('id, name, parent_id').eq('status', 'active').order('name');
             if (cancelled || !data) return;
-            setCategories(data);
+            // Parents first, each followed by its sub-categories shown as "Parent › Child".
+            const byId = new Map<string, any>(data.map((c: any) => [c.id, c]));
+            const ordered: any[] = [];
+            for (const parent of data.filter((c: any) => !c.parent_id || !byId.has(c.parent_id))) {
+                ordered.push({ ...parent, label: parent.name });
+                for (const child of data.filter((c: any) => c.parent_id === parent.id)) {
+                    ordered.push({ ...child, label: `${parent.name} › ${child.name}` });
+                }
+            }
+            setCategories(ordered);
             setCategoryId((current: string) => current || (data.length > 0 ? data[0].id : ''));
         }
         fetchCategories();
@@ -664,7 +673,7 @@ export default function ProductForm({ initialData, isEditMode = false }: Product
                                         {categories.length === 0 && <option value="">Loading categories...</option>}
                                         {categories.length > 0 && <option value="">Select a category</option>}
                                         {categories.map(cat => (
-                                            <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                            <option key={cat.id} value={cat.id}>{cat.label || cat.name}</option>
                                         ))}
                                     </select>
                                 </div>

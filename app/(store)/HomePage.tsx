@@ -46,13 +46,15 @@ export default function HomePage() {
 
         const { data: categoriesData, error: categoriesError } = await supabase
           .from('categories')
-          .select('id, name, slug, image_url, metadata')
+          .select('id, name, slug, image_url, metadata, parent_id, position')
           .eq('status', 'active')
+          .order('position', { ascending: true })
           .order('name');
 
         if (categoriesError) throw categoriesError;
 
-        const activeCategories = categoriesData || [];
+        // Only top-level categories belong on the home grid; sub-categories live inside the shop filters.
+        const activeCategories = (categoriesData || []).filter((cat: any) => !cat.parent_id);
         setAllCategories(activeCategories);
 
         const featuredCategories = activeCategories.filter(
