@@ -165,6 +165,43 @@ export default function HomePage() {
         </div>
       </section>
 
+      <section className="bg-white">
+        <Link
+          href="/shop?search=Olay%20Super%20Serum"
+          className="group relative block w-full aspect-[1024/419] bg-[#ece8f6] overflow-hidden"
+        >
+          <Image
+            src="/images/heroes/olay-super-serum.jpg"
+            alt="Olay Super Serum body wash, body lotion, and body cream"
+            fill
+            className="object-cover object-center transition-transform duration-700 group-hover:scale-[1.02]"
+            sizes="100vw"
+            priority
+          />
+          <span className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 inline-flex items-center rounded-xl bg-black/85 text-white font-extrabold uppercase tracking-[0.12em] px-4 py-2.5 text-[11px] sm:text-[12px]">
+            Shop Olay
+          </span>
+        </Link>
+      </section>
+
+      <section className="bg-white border-t border-black/5">
+        <Link
+          href="/product/nature-s-bounty-hair-skin-and-nails"
+          className="group relative block w-full aspect-[1024/576] bg-white overflow-hidden"
+        >
+          <Image
+            src="/images/heroes/natures-bounty-hair-skin-nails.jpg"
+            alt="Nature's Bounty Hair, Skin and Nails gummies"
+            fill
+            className="object-cover object-center transition-transform duration-700 group-hover:scale-[1.02]"
+            sizes="100vw"
+          />
+          <span className="absolute top-4 left-4 sm:top-6 sm:left-6 inline-flex items-center rounded-xl bg-black/85 text-white font-extrabold uppercase tracking-[0.12em] px-4 py-2.5 text-[11px] sm:text-[12px]">
+            Shop now
+          </span>
+        </Link>
+      </section>
+
       {displayCategories.length > 0 && (
       <section className="py-16 md:py-20 bg-white">
         <div className="max-w-[1400px] mx-auto px-4 sm:px-8">
