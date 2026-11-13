@@ -2,8 +2,6 @@
 'use client';
 
 import { useState, useEffect, useRef, Suspense } from 'react';
-import Link from 'next/link';
-import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import ProductCard, { type ColorVariant } from '@/components/ProductCard';
@@ -11,6 +9,7 @@ import ProductCardSkeleton from '@/components/skeletons/ProductCardSkeleton';
 import { getColorHex } from '@/components/ProductCard';
 import { supabase } from '@/lib/supabase';
 import { cachedQuery } from '@/lib/query-cache';
+import PageHero from '@/components/PageHero';
 import { isPreorderProduct } from '@/lib/preorder';
 import { displayCompareAtPrice } from '@/lib/storefront-pricing';
 
@@ -247,35 +246,12 @@ function ShopContent() {
 
   return (
     <main className="min-h-screen bg-white">
-      <section className="relative w-full overflow-hidden bg-[#ece8f6]" style={{ aspectRatio: '1024 / 419' }}>
-        <Image
-          src="/images/heroes/olay-super-serum.jpg"
-          alt="Olay Super Serum body wash, body lotion, and body cream"
-          fill
-          priority
-          className="object-cover object-center"
-          sizes="100vw"
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 z-10 px-4 pb-5 md:pb-8 text-center">
-          <h1 className="text-3xl md:text-5xl font-serif italic font-medium text-white drop-shadow-2xl">Shop</h1>
-          <p className="mt-2 text-sm md:text-base text-white/90">After-wash, shower gels, body splashes & glow essentials.</p>
-        </div>
-      </section>
-
-      <Link
-        href="/product/nature-s-bounty-hair-skin-and-nails"
-        className="relative block w-full overflow-hidden bg-white"
-        style={{ aspectRatio: '1024 / 576' }}
-      >
-        <Image
-          src="/images/heroes/natures-bounty-hair-skin-nails.jpg"
-          alt="Nature's Bounty Hair, Skin and Nails gummies"
-          fill
-          className="object-cover object-center"
-          sizes="100vw"
-        />
-      </Link>
+      <PageHero
+        title="Shop"
+        subtitle="After-wash, shower gels, body splashes & glow essentials."
+        backgroundImage="/images/heroes/olay-super-serum.jpg"
+        aspectRatio="1024 / 419"
+      />
 
       {/* Mobile Filter Toggle */}
       <div className="lg:hidden bg-white/95 backdrop-blur-md border-b border-gray-200 py-4 px-4 sticky top-[72px] z-40 shadow-sm isolate">

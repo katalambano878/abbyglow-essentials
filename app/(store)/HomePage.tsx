@@ -124,67 +124,43 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen bg-white">
-      <section className="bg-white">
-        <Link
-          href="/shop?search=Olay%20Super%20Serum"
-          className="group relative block w-full aspect-[1024/419] bg-[#ece8f6] overflow-hidden"
-        >
-          <Image
-            src="/images/heroes/olay-super-serum.jpg"
-            alt="Olay Super Serum body wash, body lotion, and body cream"
-            fill
-            className="object-cover object-center transition-transform duration-700 group-hover:scale-[1.02]"
-            sizes="100vw"
-            priority
-          />
-          <span className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 inline-flex items-center rounded-xl bg-black/85 text-white font-extrabold uppercase tracking-[0.12em] px-4 py-2.5 text-[11px] sm:text-[12px]">
-            Shop Olay
-          </span>
-        </Link>
-      </section>
+      <section className="relative min-h-[78vh] md:min-h-[86vh] overflow-hidden bg-black">
+        <Image
+          src="/images/heroes/natures-bounty-hair-skin-nails.jpg"
+          alt="Nature's Bounty Hair, Skin and Nails gummies"
+          fill
+          className="object-cover object-center"
+          priority
+          sizes="100vw"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/45 to-black/10" />
 
-      <section className="bg-white border-t border-black/5">
-        <Link
-          href="/product/nature-s-bounty-hair-skin-and-nails"
-          className="group relative block w-full aspect-[1024/576] bg-white overflow-hidden"
-        >
-          <Image
-            src="/images/heroes/natures-bounty-hair-skin-nails.jpg"
-            alt="Nature's Bounty Hair, Skin and Nails gummies"
-            fill
-            className="object-cover object-center transition-transform duration-700 group-hover:scale-[1.02]"
-            sizes="100vw"
-          />
-          <span className="absolute top-4 left-4 sm:top-6 sm:left-6 inline-flex items-center rounded-xl bg-black/85 text-white font-extrabold uppercase tracking-[0.12em] px-4 py-2.5 text-[11px] sm:text-[12px]">
-            Shop now
-          </span>
-        </Link>
-      </section>
-
-      <section className="bg-white border-t border-black/5">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-8 lg:px-12 py-12 md:py-16">
-          <p className="text-brand-accent text-[12px] font-extrabold tracking-[0.28em] uppercase mb-4">
-            Fresh. Clean. Glowing.
-          </p>
-          <h1 className="text-black text-4xl sm:text-5xl lg:text-6xl font-black leading-[0.95] tracking-tight uppercase max-w-3xl">
-            Bath & body <span className="text-brand-accent">essentials.</span>
-          </h1>
-          <p className="mt-5 text-black/70 text-[16px] sm:text-[18px] max-w-lg">
-            After-wash products, Olay shower gel, body splashes, skincare soaps, vitamins & glow essentials — Accra with nationwide delivery.
-          </p>
-          <div className="mt-8 flex flex-row items-stretch gap-2 sm:gap-3">
-            <Link
-              href="/shop"
-              className="inline-flex flex-1 sm:flex-none items-center justify-center bg-brand-accent hover:bg-brand-accentDark text-black font-extrabold tracking-[0.08em] sm:tracking-[0.12em] uppercase px-3 sm:px-8 py-3 sm:py-3.5 text-[11px] sm:text-[13px] text-center"
-            >
-              Shop now
-            </Link>
-            <Link
-              href="/categories"
-              className="inline-flex flex-1 sm:flex-none items-center justify-center border border-black text-black hover:bg-black hover:text-white font-extrabold tracking-[0.08em] sm:tracking-[0.12em] uppercase px-3 sm:px-8 py-3 sm:py-3.5 text-[11px] sm:text-[13px] text-center transition-colors"
-            >
-              Explore collection
-            </Link>
+        <div className="relative z-10 max-w-[1400px] mx-auto px-4 sm:px-8 lg:px-12 h-full min-h-[78vh] md:min-h-[86vh] flex items-center">
+          <div className="max-w-2xl py-20">
+            <p className="text-brand-accent text-[12px] font-extrabold tracking-[0.28em] uppercase mb-5">
+              Fresh. Clean. Glowing.
+            </p>
+            <h1 className="text-white text-5xl sm:text-6xl lg:text-[4.4rem] font-black leading-[0.95] tracking-tight uppercase">
+              Bath & body{' '}
+              <span className="text-brand-accent">essentials.</span>
+            </h1>
+            <p className="mt-6 text-white/75 text-[16px] sm:text-[18px] max-w-lg">
+              After-wash products, Olay shower gel, body splashes, skincare soaps, vitamins & glow essentials — Accra with nationwide delivery.
+            </p>
+            <div className="mt-9 flex flex-row items-stretch gap-2 sm:gap-3">
+              <Link
+                href="/shop"
+                className="inline-flex flex-1 sm:flex-none items-center justify-center bg-brand-accent hover:bg-brand-accentDark text-black font-extrabold tracking-[0.08em] sm:tracking-[0.12em] uppercase px-3 sm:px-8 py-3 sm:py-3.5 text-[11px] sm:text-[13px] text-center"
+              >
+                Shop now
+              </Link>
+              <Link
+                href="/categories"
+                className="inline-flex flex-1 sm:flex-none items-center justify-center border border-white text-white hover:bg-white hover:text-black font-extrabold tracking-[0.08em] sm:tracking-[0.12em] uppercase px-3 sm:px-8 py-3 sm:py-3.5 text-[11px] sm:text-[13px] text-center transition-colors"
+              >
+                Explore collection
+              </Link>
+            </div>
           </div>
         </div>
       </section>

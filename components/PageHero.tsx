@@ -5,11 +5,16 @@ interface PageHeroProps {
     title: string;
     subtitle?: string;
     backgroundImage?: string;
+    /** Show the whole background photo instead of cropping it into a short strip. */
+    aspectRatio?: string;
 }
 
-export default function PageHero({ title, subtitle, backgroundImage }: PageHeroProps) {
+export default function PageHero({ title, subtitle, backgroundImage, aspectRatio }: PageHeroProps) {
     return (
-        <div className={`relative overflow-hidden flex items-center justify-center min-h-[32vh] md:min-h-[36vh] ${!backgroundImage ? 'bg-brand-dark' : ''}`}>
+        <div
+            className={`relative overflow-hidden flex items-center justify-center ${aspectRatio ? '' : 'min-h-[32vh] md:min-h-[36vh]'} ${!backgroundImage ? 'bg-brand-dark' : ''}`}
+            style={aspectRatio ? { aspectRatio } : undefined}
+        >
             {backgroundImage ? (
                 <>
                     <Image

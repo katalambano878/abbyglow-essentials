@@ -61,6 +61,7 @@ export default async function CategoriesPage() {
         title="Categories"
         subtitle="After-wash, shower gel, body splash, soaps & vitamins."
         backgroundImage="/images/heroes/olay-super-serum.jpg"
+        aspectRatio="1024 / 419"
       />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
