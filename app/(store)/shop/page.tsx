@@ -250,7 +250,7 @@ function ShopContent() {
         title="Shop"
         subtitle="After-wash, shower gels, body splashes & glow essentials."
         backgroundImage="/images/heroes/olay-super-serum.jpg"
-        aspectRatio="1024 / 419"
+        compact
       />
 
       {/* Mobile Filter Toggle */}
