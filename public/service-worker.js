@@ -1,18 +1,11 @@
-// AbbyGlow Essentials Service Worker v3.0 — never cache auth/REST/private data
-const CACHE_VERSION = 'sl-v3.0';
+// AbbyGlow Essentials Service Worker v4.0 — drop cached pages that still show old prompts
+const CACHE_VERSION = 'sl-v4.0';
 const STATIC_CACHE = `static-${CACHE_VERSION}`;
 const DYNAMIC_CACHE = `dynamic-${CACHE_VERSION}`;
 const IMAGE_CACHE = `images-${CACHE_VERSION}`;
 const API_CACHE = `api-${CACHE_VERSION}`;
 
-// Core app shell files to pre-cache
-const STATIC_ASSETS = [
-  '/',
-  '/shop',
-  '/cart',
-  '/wishlist',
-  '/categories',
-];
+// Do not pre-cache HTML pages. A saved shop page was still showing removed prompts.
 const OFFLINE_URL = '/offline';
 
 // Pages that are useless as a cached shell (they need live data or carry
@@ -40,15 +33,11 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(STATIC_CACHE).then(async (cache) => {
       await cache.add(OFFLINE_URL).catch((err) => console.warn('[SW] Offline page failed to cache:', err));
-      await Promise.all(
-        STATIC_ASSETS.map((url) => cache.add(url).catch((err) => console.warn('[SW] Failed to cache', url, err)))
-      );
-    })
+    }).then(() => self.skipWaiting())
   );
 });
 
-// The page asks us to activate after the user taps "Update" (see UpdatePrompt).
-// Activating on install would force-reload every open tab mid-checkout.
+// Install already calls skipWaiting(). This message remains for the update button.
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
@@ -288,7 +277,7 @@ self.addEventListener('periodicsync', (event) => {
   if (event.tag === 'update-content') {
     event.waitUntil(
       caches.open(STATIC_CACHE).then((cache) => {
-        return Promise.all([OFFLINE_URL, ...STATIC_ASSETS].map((url) => cache.add(url).catch(() => { })));
+        return cache.add(OFFLINE_URL).catch(() => { });
       })
     );
   }
