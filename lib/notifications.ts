@@ -7,6 +7,7 @@ import { depositPlanLabel, isDepositPlan } from '@/lib/payments/plans';
 
 const resend = new Resend(process.env.RESEND_API_KEY || 'missing_api_key');
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@abbyglow.shop';
+const ADMIN_ORDER_PHONE = process.env.ADMIN_ORDER_PHONE || '0244638945';
 const EMAIL_FROM = process.env.EMAIL_FROM || 'AbbyGlow Essentials <noreply@abbyglow.shop>';
 const BRAND = {
     name: 'AbbyGlow Essentials',
@@ -302,6 +303,39 @@ export async function sendSMS({
     } catch (error: any) {
         console.error('[SMS] Error:', error.message);
         return null;
+    }
+}
+
+function orderCustomerName(order: any): string {
+    const shipping = order?.shipping_address;
+    const metadata = order?.metadata;
+    if (shipping?.full_name) return String(shipping.full_name);
+    if (shipping?.firstName) {
+        return shipping.lastName ? `${shipping.firstName} ${shipping.lastName}` : String(shipping.firstName);
+    }
+    if (metadata?.first_name) {
+        return metadata.last_name ? `${metadata.first_name} ${metadata.last_name}` : String(metadata.first_name);
+    }
+    return 'Customer';
+}
+
+/** Text the shop phone as soon as a purchase is placed, including unpaid orders. */
+export async function sendAdminOrderAlert(order: any) {
+    if (!ADMIN_ORDER_PHONE) return;
+
+    const orderNumber = order.order_number || order.id;
+    const total = Number(order.total || 0).toFixed(2);
+    const paymentStatus = String(order.payment_status || 'pending').replace(/_/g, ' ');
+    const customer = orderCustomerName(order);
+    const customerPhone = order.phone || order.shipping_address?.phone || '';
+    const pending = paymentStatus !== 'paid';
+    const headline = pending ? `Pending purchase #${orderNumber}` : `New paid order #${orderNumber}`;
+    const message = `AbbyGlow: ${headline}. GH₵${total}. ${customer}${customerPhone ? `, ${customerPhone}` : ''}. Payment: ${paymentStatus}.`;
+
+    try {
+        await sendSMS({ to: ADMIN_ORDER_PHONE, message });
+    } catch (error: any) {
+        console.error('[SMS] Admin order alert failed:', error?.message || error);
     }
 }
 

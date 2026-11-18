@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { verifyAuth } from '@/lib/auth';
 import { escapeHtml } from '@/lib/sanitize';
-import { sendOrderConfirmation, sendOrderStatusUpdate, sendWelcomeMessage, sendContactMessage, sendPaymentLink, sendEmail, sendSMS, emailLayout } from '@/lib/notifications';
+import { sendOrderConfirmation, sendAdminOrderAlert, sendOrderStatusUpdate, sendWelcomeMessage, sendContactMessage, sendPaymentLink, sendEmail, sendSMS, emailLayout } from '@/lib/notifications';
 import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
 import { claimOrderConfirmation } from '@/lib/payments/audit';
 
@@ -86,6 +86,9 @@ export async function POST(request: Request) {
             if (!perOrder.success) {
                 return NextResponse.json({ success: true, message: 'Already sent' });
             }
+
+            const adminAlert = checkRateLimit(`admin-order-sms:${order.id}`, { maxRequests: 1, windowSeconds: 24 * 60 * 60 });
+            if (adminAlert.success) await sendAdminOrderAlert(order);
 
             if (order.payment_status === 'paid' || order.payment_status === 'partially_paid') {
                 const shouldSend = await claimOrderConfirmation(order.id);

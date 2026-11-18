@@ -120,7 +120,10 @@ export default function HomePage() {
   };
 
   const displayCategories = categories.slice(0, 5);
-  const arrivals = (newProducts.length > 0 ? newProducts : featuredProducts).slice(0, 8);
+  const arrivals = newProducts.slice(0, 8);
+  const arrivalIds = new Set(arrivals.map((product) => product.id));
+  const featuredWithoutArrivals = featuredProducts.filter((product) => !arrivalIds.has(product.id));
+  const featured = (featuredWithoutArrivals.length > 0 ? featuredWithoutArrivals : featuredProducts).slice(0, 8);
 
   return (
     <main className="min-h-screen bg-white">
@@ -204,8 +207,8 @@ export default function HomePage() {
       <section className="py-16 md:py-20 bg-white border-t border-black/5">
         <div className="max-w-[1100px] mx-auto px-4 sm:px-8">
           <div className="flex items-end justify-between gap-4 mb-8">
-            <h2 className="text-[26px] sm:text-[32px] font-black uppercase tracking-tight text-black">New arrivals</h2>
-            <Link href="/shop?sort=new" className="text-[12px] font-extrabold uppercase tracking-[0.14em] text-black inline-flex items-center gap-1 hover:text-black/50">
+            <h2 className="text-[26px] sm:text-[32px] font-black uppercase tracking-tight text-black">Featured products</h2>
+            <Link href="/shop" className="text-[12px] font-extrabold uppercase tracking-[0.14em] text-black inline-flex items-center gap-1 hover:text-black/50">
               View all <i className="ri-arrow-right-line" />
             </Link>
           </div>
@@ -216,19 +219,50 @@ export default function HomePage() {
                 <ProductCardSkeleton key={i} />
               ))}
             </div>
+          ) : featured.length > 0 ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 md:gap-3">
+              {featured.map((product) => (
+                <ProductCard
+                  key={product.id}
+                  {...mapProduct(product)}
+                  variant="showcase"
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="border border-dashed border-black/20 px-6 py-16 text-center">
+              <p className="text-black/50">Featured products will appear here once they are marked in admin.</p>
+              <Link href="/shop" className="inline-flex mt-4 font-extrabold uppercase tracking-wide text-black">Browse the shop</Link>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="py-16 md:py-20 bg-white border-t border-black/5">
+        <div className="max-w-[1100px] mx-auto px-4 sm:px-8">
+          <div className="flex items-end justify-between gap-4 mb-8">
+            <h2 className="text-[26px] sm:text-[32px] font-black uppercase tracking-tight text-black">New arrivals</h2>
+            <Link href="/shop?sort=new" className="text-[12px] font-extrabold uppercase tracking-[0.14em] text-black inline-flex items-center gap-1 hover:text-black/50">
+              View all <i className="ri-arrow-right-line" />
+            </Link>
+          </div>
+
+          {loading ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 md:gap-3">
+              {[...Array(8)].map((_, i) => (
+                <ProductCardSkeleton key={`new-${i}`} />
+              ))}
+            </div>
           ) : arrivals.length > 0 ? (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 md:gap-3">
-              {arrivals.map((product) => {
-                const mapped = mapProduct(product);
-                return (
-                  <ProductCard
-                    key={product.id}
-                    {...mapped}
-                    badge="NEW"
-                    variant="showcase"
-                  />
-                );
-              })}
+              {arrivals.map((product) => (
+                <ProductCard
+                  key={product.id}
+                  {...mapProduct(product)}
+                  badge="NEW"
+                  variant="showcase"
+                />
+              ))}
             </div>
           ) : (
             <div className="border border-dashed border-black/20 px-6 py-16 text-center">
