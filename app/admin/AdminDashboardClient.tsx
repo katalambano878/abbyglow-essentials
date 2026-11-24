@@ -11,7 +11,6 @@ const statColorClasses: Record<string, string> = {
   amber: 'bg-amber-100 text-amber-700',
 };
 
-import { SmsCreditDashboardCard } from '@/components/admin/SmsCreditDashboardCard';
 import type { DashboardSmsCredit } from '@/lib/sms-credit-types';
 
 const PAID_STATUSES = ['paid', 'partially_paid'];
@@ -298,8 +297,7 @@ export default function AdminDashboardClient({ smsCredit }: { smsCredit: Dashboa
               <p className="text-gray-600 text-sm">{stat.title}</p>
             </div>
           ))}
-          <SmsCreditDashboardCard smsCredit={smsCredit} />
-        </div>
+</div>
 
         {/* Revenue Chart & Quick Actions */}
         <div className="grid lg:grid-cols-3 gap-6 mb-8">
