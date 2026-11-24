@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
 
 type Props = {
   smsCredit?: unknown;
@@ -17,7 +18,10 @@ export function SmsCreditDashboardCard({ buySmsHref = '/admin/sms-credit' }: Pro
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/admin/sms-credit', { credentials: 'same-origin', cache: 'no-store' });
+        const { data: { session } } = await supabase.auth.getSession();
+        const headers = new Headers();
+        if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`);
+        const res = await fetch('/api/admin/sms-credit', { headers, credentials: 'include', cache: 'no-store' });
         const json = await res.json().catch(() => null);
         if (cancelled || !res.ok || !json?.configured) return;
         const sms = Number(json.sms_left);
