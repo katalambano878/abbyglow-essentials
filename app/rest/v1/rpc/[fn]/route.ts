@@ -4,6 +4,8 @@ import { isPlainPostgres } from "@/lib/db/mode";
 import { resolveRestActor } from "@/lib/db/rest-auth";
 import { authorizeRpc } from "@/lib/db/rest-acl";
 
+import { guardRpc } from "@/lib/db/rest-guard";
+
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -21,7 +23,7 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: cors });
 }
 
-export async function POST(
+async function postUnguarded(
   req: NextRequest,
   ctx: { params: Promise<{ fn: string }> }
 ) {
@@ -63,3 +65,5 @@ export async function POST(
   }
   return NextResponse.json(data, { headers: cors });
 }
+
+export const POST = guardRpc(postUnguarded);
